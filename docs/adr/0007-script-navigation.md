@@ -19,22 +19,22 @@ The file opens with a **master TOC** listing all `§NN` sections. Each `§NN` se
 
 ### Marker format
 
-Each marker embeds both the `§NN` canonical form and an `ssNN` ASCII alias on the same line, so both are searchable without the section sign glyph:
+Section markers use `§NN` (section sign, U+00A7) only. The typeable alias is handled by a vim `cnoreabbrev`, not embedded in the file.
 
 Section headers:
 ```sh
 # ────────────────────────────────────────────────────────────
-# §05 ss05 STEM RESOLUTION
+# §05 STEM RESOLUTION
 # ────────────────────────────────────────────────────────────
-# §05.01 ss05.01  resolve_stem()      — symlink dispatch → first positional arg
-# §05.02 ss05.02  load_stem()         — load .run and .env for a stem
-# §05.03 ss05.03  parse_run_file()    — parse mount paths and @include directives
-# §05.04 ss05.04  parse_env_file()    — parse KEY=VALUE env file
+# §05.01  resolve_stem()      — symlink dispatch → first positional arg
+# §05.02  load_stem()         — load .run and .env for a stem
+# §05.03  parse_run_file()    — parse mount paths and @include directives
+# §05.04  parse_env_file()    — parse KEY=VALUE env file
 ```
 
 Function headers:
 ```sh
-# §05.03 ss05.03 parse_run_file STEM FILE
+# §05.03 parse_run_file STEM FILE
 parse_run_file() {
 ```
 
@@ -58,22 +58,19 @@ parse_run_file() {
 ```sh
 # VIM NAVIGATION
 # ─────────────────────────────────────────────────────────────
-# Each marker has two forms: §NN (section sign) and ssNN (typeable ASCII).
-# Either form works for all searches below.
+# Section markers use § (U+00A7). To search without typing §,
+# add this to .vimrc — then /ss05 finds §05, /ss05.03 finds §05.03:
+#   cnoreabbrev ss §
 #
-# Jump to section (section sign):  /§05<CR>
-# Jump to section (ASCII alias):   /ss05<CR>
-# Jump to subsection:              /ss05\.03<CR>
-# List all sections:               :g/^# §[0-9]/p
-# List subsections of §05:         :g/^# §05\./p
-# Jump to word under cursor:       yiw/<C-R>0<CR>
+# Jump to section:           /§05<CR>   (or: /ss05<CR> with abbrev)
+# Jump to subsection:        /§05\.03<CR>
+# List all sections:         :g/^# §[0-9]/p
+# List subsections of §05:   :g/^# §05\./p
+# Jump to word under cursor: yiw/<C-R>0<CR>
 #
-# Suggested mappings (add to .vimrc):
-#   " Jump to section marker under cursor (works with ssNN or §NN word)
+# Suggested .vimrc mappings:
+#   cnoreabbrev ss §
 #   nnoremap <Leader>] yiw/<C-R>0<CR>
-#   " Prompt for section number, jump using typeable alias
-#   nnoremap <Leader>s :call search('ss' . input('Section: '))<CR>
-#   " List all section headers in quickfix
 #   nnoremap <Leader>§ :vimgrep /^# §/ % \| copen<CR>
 ```
 
