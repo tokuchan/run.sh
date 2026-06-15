@@ -307,17 +307,232 @@ find_run_root() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# §05 STEM RESOLUTION
+# ─────────────────────────────────────────────────────────────
+# §05.01  parse_env_file()  — parse KEY=VALUE env file into RUN_ENV_PAIRS
+
+# ─────────────────────────────────────────────────────────────
+# §05 STEM RESOLUTION
+# ─────────────────────────────────────────────────────────────
+# §05.01  resolve_stem()    — symlink dispatch → first positional word
+# §05.02  parse_env_file()  — parse KEY=VALUE env file into RUN_ENV_PAIRS
+# §05.03  parse_run_file()  — parse mount paths and @include directives
+# §05.04  load_explicit_stems() — load stems from -s options
+
+# §05.01 resolve_stem
+# Sets RUN_STEM. If basename($0) != run.sh, uses that; otherwise uses
+# the first word of RUN_USER_CMD (which remains unchanged — the stem
+# name is also the first word of the command passed to the container).
+resolve_stem() {
+    local script_name
+    script_name="$(basename "$0")"
+    if [ "$script_name" != "run.sh" ]; then
+        RUN_STEM="$script_name"
+    else
+        RUN_STEM="${RUN_USER_CMD%% *}"
+    fi
+}
+
+# §05.04 load_explicit_stems
+# Loads each stem listed in RUN_EXPLICIT_STEMS (space-separated).
+load_explicit_stems() {
+    local stem
+    for stem in $RUN_EXPLICIT_STEMS; do
+        parse_run_file "$stem" "$RUN_RUN_ROOT/${stem}.run"
+        parse_env_file "$RUN_RUN_ROOT/${stem}.env"
+    done
+}
+
+# §05.01 parse_env_file FILE
+# Appends parsed KEY=VALUE pairs to RUN_ENV_PAIRS (newline-separated).
+parse_env_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    local line
+    while IFS= read -r line; do
+        case "$line" in
+            ''|'#'*) continue ;;
+        esac
+        RUN_ENV_PAIRS="${RUN_ENV_PAIRS}${line}
+"
+    done < "$file"
+}
+
+# §05.02 parse_run_file STEM FILE
+# Appends bind-mount specs to RUN_MOUNT_PAIRS (host:container per line).
+# Recursively processes @include directives (stem name, not file path).
+# Guards against infinite include loops via RUN_INCLUDE_SEEN.
+parse_run_file() {
+    local stem="$1" file="$2"
+    [ -f "$file" ] || return 0
+
+    local seen_key="<<<${stem}>>>"
+    case "$RUN_INCLUDE_SEEN" in
+        *"$seen_key"*) log_warn "@include loop detected for stem '$stem', skipping"; return 0 ;;
+    esac
+    RUN_INCLUDE_SEEN="${RUN_INCLUDE_SEEN}${seen_key}"
+
+    local line
+    while IFS= read -r line; do
+        case "$line" in
+            ''|'#'*) continue ;;
+            '@include '*)
+                local inc_stem="${line#@include }"
+                inc_stem="$(printf '%s' "$inc_stem" | tr -d ' ')"
+                parse_run_file "$inc_stem" "$RUN_RUN_ROOT/${inc_stem}.run"
+                parse_env_file "$RUN_RUN_ROOT/${inc_stem}.env"
+                ;;
+            /*)
+                local host_path="${RUN_RUN_ROOT}/fs/${stem}${line}"
+                RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${host_path}:${line}
+"
+                ;;
+            *)
+                log_warn "ignoring unrecognized line in ${file}: $line"
+                ;;
+        esac
+    done < "$file"
+}
+
+# ─────────────────────────────────────────────────────────────
+# §06 MOUNT CONSTRUCTION
+# ─────────────────────────────────────────────────────────────
+# §06.01  build_cwd_mounts()    — add CWD and project root mounts
+# §06.02  build_mirror_mounts() — add --mirror / --mirror-ro mounts
+
+# §06.01 build_cwd_mounts
+# Appends CWD and project root bind-mounts to RUN_MOUNT_PAIRS.
+# If CWD == project root, only one entry is added.
+build_cwd_mounts() {
+    [ "${RUN_CWD:-1}" = "1" ] || return 0
+    local cwd project_root
+    cwd="$(readlink -f "$PWD")"
+    project_root="$(readlink -f "$RUN_RUN_ROOT")"
+
+    RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${cwd}:${cwd}
+"
+    if [ "$project_root" != "$cwd" ]; then
+        RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${project_root}:${project_root}
+"
+    fi
+    RUN_WORKDIR="$cwd"
+}
+
+# §06.02 build_mirror_mounts
+# Appends --mirror and --mirror-ro paths to RUN_MOUNT_PAIRS.
+build_mirror_mounts() {
+    local path
+    for path in $RUN_MIRRORS; do
+        RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${path}:${path}
+"
+    done
+    for path in $RUN_MIRRORS_RO; do
+        RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${path}:${path}:ro
+"
+    done
+}
+
+# ─────────────────────────────────────────────────────────────
+# §08 RUNTIME DETECTION & UID MAPPING
+# ─────────────────────────────────────────────────────────────
+# §08.01  detect_runtime()  — podman → docker auto-detect
+# §08.02  uid_map_args()    — runtime-specific UID/GID mapping flags
+
+# §08.01 detect_runtime
+detect_runtime() {
+    if [ -n "$RUN_RUNTIME" ]; then
+        return 0
+    fi
+    if command -v podman >/dev/null 2>&1; then
+        RUN_RUNTIME="podman"
+    elif command -v docker >/dev/null 2>&1; then
+        RUN_RUNTIME="docker"
+    else
+        log_error "no container runtime found (tried podman, docker)"
+        return 1
+    fi
+}
+
+# §08.02 uid_map_args — prints runtime-specific UID mapping flags to stdout
+uid_map_args() {
+    case "$RUN_RUNTIME" in
+        podman) printf '%s' "--userns=keep-id" ;;
+        docker) printf '%s' "--user $(id -u):$(id -g)" ;;
+    esac
+}
+
+# ─────────────────────────────────────────────────────────────
 # §09 CONTAINER INVOCATION
 # ─────────────────────────────────────────────────────────────
-# §09.01  dry_run_print()  — print resolved invocation
+# §09.01  dry_run_print()   — print resolved invocation
+# §09.02  invoke_container() — build and exec the container command
 
 # §09.01 dry_run_print
 dry_run_print() {
-    # Dry-run always prints — user explicitly asked for it, so bypass verbosity gate
     local ts
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    local pair
+    printf '%s\n' "$RUN_MOUNT_PAIRS" | while IFS= read -r pair; do
+        [ -z "$pair" ] && continue
+        printf '%s [INFO ] run: dry-run mount %s\n' "$ts" "$pair" >&2
+    done
+    printf '%s\n' "$RUN_ENV_PAIRS" | while IFS= read -r pair; do
+        [ -z "$pair" ] && continue
+        printf '%s [INFO ] run: dry-run env %s\n' "$ts" "$pair" >&2
+    done
     printf '%s [INFO ] run: dry-run image=%s command: %s\n' \
         "$ts" "${RUN_IMAGE:-<unset>}" "$RUN_USER_CMD" >&2
+}
+
+# §09.02 invoke_container
+# Build and exec the container command. Uses here-doc redirections (not pipes)
+# to iterate over mount/env pairs while staying in the current shell so that
+# set -- accumulates args without subshell isolation.
+invoke_container() {
+    detect_runtime || exit 125
+
+    # Start building positional params for: $runtime run <args> $image -c '"$@"' -- $cmd
+    set --
+
+    # UID mapping
+    case "$RUN_RUNTIME" in
+        podman) set -- "$@" --userns=keep-id ;;
+        docker) set -- "$@" --user "$(id -u):$(id -g)" ;;
+    esac
+
+    # Stdin always connected; TTY auto-detected
+    set -- "$@" -i
+    local do_tty="$RUN_TTY"
+    [ "$do_tty" = "auto" ] && { [ -t 0 ] && do_tty=1 || do_tty=0; }
+    [ "$do_tty" = "1" ] && set -- "$@" -t
+
+    # Mounts — here-doc keeps loop in current shell (no subshell, set -- works)
+    while IFS= read -r _pair; do
+        [ -z "$_pair" ] && continue
+        set -- "$@" --volume "$_pair"
+    done <<_MOUNTS_
+$RUN_MOUNT_PAIRS
+_MOUNTS_
+
+    # Env host forwarding (podman only; docker: individual --env flags)
+    if [ "${RUN_ENV_HOST:-1}" = "1" ]; then
+        [ "$RUN_RUNTIME" = "podman" ] && set -- "$@" --env-host
+    fi
+
+    # Env pairs from .env files
+    while IFS= read -r _pair; do
+        [ -z "$_pair" ] && continue
+        set -- "$@" --env "$_pair"
+    done <<_ENVS_
+$RUN_ENV_PAIRS
+_ENVS_
+
+    # Workdir and entrypoint
+    [ -n "${RUN_WORKDIR:-}" ] && set -- "$@" --workdir "$RUN_WORKDIR"
+    set -- "$@" --entrypoint bash
+
+    # Execute and propagate exit code
+    "$RUN_RUNTIME" run "$@" "$RUN_IMAGE" -c '"$@"' -- $RUN_USER_CMD
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -346,10 +561,30 @@ main() {
     parse_conf "$RUN_RUN_ROOT/run.conf"
     apply_env
 
+    resolve_stem
+
+    RUN_ENV_PAIRS=""
+    RUN_MOUNT_PAIRS=""
+    RUN_INCLUDE_SEEN=""
+
+    # Load order: default → resolved stem → run.conf stems → -s explicit stems
+    parse_run_file "default" "$RUN_RUN_ROOT/default.run"
+    parse_env_file "$RUN_RUN_ROOT/default.env"
+    if [ -n "$RUN_STEM" ] && [ "$RUN_STEM" != "default" ]; then
+        parse_run_file "$RUN_STEM" "$RUN_RUN_ROOT/${RUN_STEM}.run"
+        parse_env_file "$RUN_RUN_ROOT/${RUN_STEM}.env"
+    fi
+    load_explicit_stems
+    build_cwd_mounts
+    build_mirror_mounts
+
     if [ "${RUN_DRY_RUN:-0}" = "1" ]; then
         dry_run_print
         exit 0
     fi
+
+    invoke_container
+    exit $?
 }
 
 main "$@"
