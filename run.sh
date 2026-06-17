@@ -1,5 +1,7 @@
 #!/bin/sh
 # run.sh — run containerized commands in your dev environment
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sean Spillane
 #
 # VIM NAVIGATION
 # ─────────────────────────────────────────────────────────────
