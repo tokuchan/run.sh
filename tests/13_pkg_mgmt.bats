@@ -51,3 +51,11 @@ FLAKE
     [ "$status" -eq 125 ]
     ! grep -q "not-a-real-package" "$FIXTURE_DIR/flake.nix"
 }
+
+@test "add: --add is idempotent when package already in flake.nix" {
+    write_flake
+    run "$RUN_SH" --add bash
+    [ "$status" -eq 0 ]
+    # bash should appear exactly once (not duplicated)
+    [ "$(grep -c "^[[:space:]]*bash[[:space:]]*$" "$FIXTURE_DIR/flake.nix")" -eq 1 ]
+}
