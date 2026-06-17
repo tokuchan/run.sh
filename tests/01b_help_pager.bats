@@ -36,6 +36,23 @@ EOF
     [ ! -f "$FAKE_PAGER_LOG" ]
 }
 
+# ── SGR formatting ───────────────────────────────────────────────────────────
+
+@test "help: section headers have SGR codes when stdout is a TTY" {
+    # typescript file captures PTY output including escape sequences
+    # PAGER=cat avoids less blocking for input on the PTY
+    TS="$FIXTURE_DIR/typescript"
+    script -q -c "PAGER=cat $RUN_SH --help" "$TS"
+    # Section header "NAME" should be preceded by an SGR escape sequence
+    grep -qP '\x1b\[' "$TS"
+}
+
+@test "help: NO_COLOR suppresses SGR codes on TTY" {
+    TS="$FIXTURE_DIR/typescript"
+    script -q -c "PAGER=cat NO_COLOR=1 $RUN_SH --help" "$TS"
+    ! grep -qP '\x1b\[' "$TS"
+}
+
 # ── Pager chain ───────────────────────────────────────────────────────────────
 
 @test "help: uses less -FRX when PAGER unset and less is in PATH" {

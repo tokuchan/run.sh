@@ -84,13 +84,13 @@ Run 'run --help' for the full manual with all options and examples.
 EOF
 }
 
-# §01.02a _help_body — raw help text (consumed by help())
+# §01.02a _help_body — help text with SGR semantic variables (set by help())
 _help_body() {
-    cat <<'EOF'
-NAME
+    cat <<EOF
+${SECTION}NAME${RESET}
     run — run containerized commands in your dev environment
 
-DESCRIPTION
+${SECTION}DESCRIPTION${RESET}
     run.sh wraps a container runtime (podman or docker) to execute commands
     inside a project-specific container while keeping host and container paths
     aligned. The current working directory, project root, and any configured
@@ -98,13 +98,13 @@ DESCRIPTION
     so compiler output, debugger paths, and tool output are identical on host
     and inside the container.
 
-SYNOPSIS
+${SECTION}SYNOPSIS${RESET}
     run [OPTIONS] [STEM] [--] COMMAND [ARGS...]
 
     If run.sh is invoked via a symlink, the symlink name is the stem.
     Otherwise the first non-option argument is the stem.
 
-STEM & CONFIGURATION FILES
+${SECTION}STEM & CONFIGURATION FILES${RESET}
     Stems select sets of mounts and environment variables. Resolution order:
       1. default.run + default.env  (always loaded first)
       2. <stem>.run + <stem>.env    (auto-resolved stem)
@@ -120,53 +120,53 @@ STEM & CONFIGURATION FILES
       KEY=VALUE                  inject into container environment
       # comment                  ignored
 
-OPTIONS
-  Stem selection:
+${SECTION}OPTIONS${RESET}
+  ${SUBSECTION}Stem selection:${RESET}
     -s, --stem <name>      Load an additional stem (repeatable)
 
-  Mounts:
+  ${SUBSECTION}Mounts:${RESET}
     --mirror <path>        Canonicalize path, bind-mount at same abs path (rw)
     --mirror-ro <path>     Same, read-only
     --cwd / --no-cwd       Mirror CWD and project root (default: on)
 
-  Environment:
+  ${SUBSECTION}Environment:${RESET}
     --env-host / --no-env-host
                            Forward host environment into container (default: on)
 
-  Container:
+  ${SUBSECTION}Container:${RESET}
     --runtime <r>          podman or docker (default: auto-detect)
     --image <img>          Container image (overrides run.conf)
     --tty / --no-tty       Allocate pseudo-TTY (default: auto-detect)
 
-  Image management:
+  ${SUBSECTION}Image management:${RESET}
     --build / --no-build        Auto-build image when absent (default: on)
     --rebuild / --no-rebuild    Auto-rebuild when Dockerfile fingerprint
                                 changes (default: on)
     --force-rebuild             Rebuild unconditionally regardless of fingerprint
     --clean                     Remove image and exit 0
 
-  Nix store:
+  ${SUBSECTION}Nix store:${RESET}
     --store <mode>         Mount mode for /nix inside container:
                              shared  XDG_CACHE_HOME/run/nix (default)
                              local   <run-root>/fs/default/nix
                            Store is seeded from image on first use.
 
-  Diagnostics:
+  ${SUBSECTION}Diagnostics:${RESET}
     --dry-run              Print resolved invocation to stderr; do not execute
     -v, --verbose          Increase verbosity (repeat for more: -vv, -vvv)
     -q, --quiet            Suppress non-error log output
     --project-root <path>  Override project root detection
 
-  Bootstrap (writes stub files to CWD; never clobbers existing files):
+  ${SUBSECTION}Bootstrap${RESET} (writes stub files to CWD; never clobbers existing files):
     --init                 Write Dockerfile, flake.nix, and run.conf
     --init-container       Write Dockerfile (and append .gitignore entries)
     --init-flake           Write flake.nix with devShells.default
     --init-config          Write run.conf with image placeholder
 
-  General:
+  ${SUBSECTION}General:${RESET}
     -h, --help             Show this manual
 
-LOG FORMAT
+${SECTION}LOG FORMAT${RESET}
     All run.sh diagnostics go to stderr:
       TIMESTAMP [SEVERITY] run: MESSAGE [JSON]
 
@@ -177,14 +177,14 @@ LOG FORMAT
       Extract JSON:    run ... 2>&1 | grep -oE '\{[^}]*\}'
       Clean messages:  run ... 2>&1 | sed 's/ {[^}]*}$//'
 
-EXIT CODES
+${SECTION}EXIT CODES${RESET}
     Passes through the container command's exit code.
     125  run.sh itself failed (bad config, missing runtime, etc.)
 
-EXAMPLES
+${SECTION}EXAMPLES${RESET}
     # Bootstrap a new project
     run --init                         # write Dockerfile, flake.nix, run.conf
-    $EDITOR flake.nix                  # add your packages to devShells.default
+    \$EDITOR flake.nix                  # add your packages to devShells.default
     run make all                       # image built automatically on first run
 
     # Daily use
@@ -202,6 +202,18 @@ EOF
 
 # §01.02 help
 help() {
+    # SGR primitives — empty when NO_COLOR is set or stdout is not a terminal
+    local BOLD="" CYAN="" RESET=""
+    if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+        BOLD="$(printf '\033[1m')"
+        CYAN="$(printf '\033[36m')"
+        RESET="$(printf '\033[0m')"
+    fi
+    # Semantic variables built from primitives
+    local SECTION="${BOLD}${CYAN}"
+    local SUBSECTION="${BOLD}"
+
+    # Pager detection: $PAGER → less -FRX → more (non-TTY: no pager)
     local pager=""
     if [ -t 1 ]; then
         if [ -n "${PAGER:-}" ]; then

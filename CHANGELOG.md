@@ -6,6 +6,13 @@ Versions are date codes: `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Added
+- Auto-paging for `--help`: pipes through `$PAGER` → `less -FRX` → `more` → `cat`
+  only when stdout is a TTY
+- SGR terminal formatting for `--help` section/subsection headers (bold+cyan
+  sections, bold subsections); suppressed when stdout is not a TTY or `NO_COLOR`
+  is set
+
 ## [2026-06-17]
 
 ### Added
