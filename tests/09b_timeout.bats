@@ -26,3 +26,9 @@ teardown() { teardown_fixture; }
     FAKE_RUNTIME_EXIT=42 run "$RUN_SH" --timeout 30 echo hi
     [ "$status" -eq 42 ]
 }
+
+@test "timeout: --tty with --timeout warns and runs without TTY" {
+    run --separate-stderr "$RUN_SH" --tty --timeout 30 --dry-run echo hi
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"--tty ignored"* ]]
+}

@@ -821,11 +821,6 @@ _invoke_with_timeout() {
     local _sentinel="/tmp/run-timeout-$$"
     rm -f "$_sentinel"
 
-    # Warn if user explicitly requested TTY (timeout implies --no-tty)
-    if [ "${RUN_TTY:-auto}" = "1" ]; then
-        log_warn "--tty ignored: --timeout implies no TTY"
-    fi
-
     # Run container in background without TTY; args already built by invoke_container
     if [ "${RUN_DEVSHELL:-0}" = "1" ]; then
         "$RUN_RUNTIME" run --name "$_cname" "$@" "$RUN_IMAGE" \
@@ -1057,6 +1052,11 @@ main() {
 
     RUN_DEVSHELL=0
     [ -f "${RUN_RUN_ROOT}/flake.nix" ] && RUN_DEVSHELL=1
+
+    # Warn early (before dry-run exits) so the conflict is always visible
+    if [ "${RUN_TIMEOUT:-0}" != "0" ] && [ "${RUN_TTY:-auto}" = "1" ]; then
+        log_warn "--tty ignored: --timeout implies no TTY"
+    fi
 
     if [ "${RUN_DRY_RUN:-0}" = "1" ]; then
         dry_run_print
