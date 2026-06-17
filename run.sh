@@ -842,6 +842,36 @@ pkg_search() {
     "$RUN_RUNTIME" run --rm "$RUN_IMAGE" nix search nixpkgs "$term"
 }
 
+# §13.02 pkg_add
+pkg_add() {
+    local pkg="$1"
+    local flake="${RUN_RUN_ROOT}/flake.nix"
+
+    if [ ! -f "$flake" ]; then
+        log_error "flake.nix not found at $flake; cannot add package"
+        exit 125
+    fi
+
+    local sentinel="# run:packages"
+    if ! grep -qF "$sentinel" "$flake"; then
+        log_error "sentinel '$sentinel' not found in flake.nix; add packages manually"
+        exit 125
+    fi
+
+    if grep -qE "^[[:space:]]+${pkg}[[:space:]]*$" "$flake"; then
+        log_warn "package '$pkg' already in flake.nix; nothing to do"
+        return 0
+    fi
+
+    if ! "$RUN_RUNTIME" run --rm "$RUN_IMAGE" nix eval "nixpkgs#${pkg}" >/dev/null 2>&1; then
+        log_error "package '$pkg' not found in nixpkgs (nix eval nixpkgs#${pkg} failed)"
+        exit 125
+    fi
+
+    sed -i "s|${sentinel}|        ${pkg}\n        ${sentinel}|" "$flake"
+    log_info "added '$pkg' to flake.nix; run 'run true' to pre-warm the nix store"
+}
+
 # §13.04 manage_packages
 # Runs --search, then --add, then --remove. Called from main after manage_image.
 manage_packages() {
@@ -851,6 +881,11 @@ manage_packages() {
         pkg_search "$RUN_PKG_SEARCH"
         did_something=1
     fi
+
+    for pkg in ${RUN_PKG_ADD:-}; do
+        pkg_add "$pkg"
+        did_something=1
+    done
 
     [ "$did_something" = "1" ] && exit 0
 }
