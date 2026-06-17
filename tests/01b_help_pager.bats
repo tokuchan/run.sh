@@ -35,3 +35,15 @@ EOF
     [ "$status" -eq 0 ]
     [ ! -f "$FAKE_PAGER_LOG" ]
 }
+
+# ── Pager chain ───────────────────────────────────────────────────────────────
+
+@test "help: uses less -FRX when PAGER unset and less is in PATH" {
+    mkdir -p "$FIXTURE_DIR/bin"
+    FAKE_LESS_LOG="$FIXTURE_DIR/less.log"
+    printf '#!/bin/sh\necho "$@" > %s\ncat\n' "$FAKE_LESS_LOG" > "$FIXTURE_DIR/bin/less"
+    chmod +x "$FIXTURE_DIR/bin/less"
+    # Unset PAGER to force the less-discovery path (nix develop sets PAGER=less by default)
+    script -q -c "unset PAGER; PATH=$FIXTURE_DIR/bin:\$PATH $RUN_SH --help" /dev/null
+    grep -q "\-FRX" "$FAKE_LESS_LOG"
+}
