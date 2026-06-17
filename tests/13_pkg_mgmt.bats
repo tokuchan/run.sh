@@ -44,3 +44,10 @@ FLAKE
         | awk -F: '{print NR, $1}' \
         | awk 'NR==1{rg=$2} NR==2{sentinel=$2} END{exit (rg < sentinel) ? 0 : 1}'
 }
+
+@test "add: --add exits 125 when package not in nixpkgs" {
+    write_flake
+    FAKE_NIX_EVAL_EXIT=1 run "$RUN_SH" --add not-a-real-package
+    [ "$status" -eq 125 ]
+    ! grep -q "not-a-real-package" "$FIXTURE_DIR/flake.nix"
+}
