@@ -75,6 +75,14 @@ FLAKE
     grep -q "[[:space:]]fd$" "$FIXTURE_DIR/flake.nix"
 }
 
+# ── --remove ──────────────────────────────────────────────────────────────────
+@test "remove: --remove deletes package line from flake.nix" {
+    write_flake
+    run "$RUN_SH" --remove bash
+    [ "$status" -eq 0 ]
+    ! grep -qE "^[[:space:]]+bash[[:space:]]*$" "$FIXTURE_DIR/flake.nix"
+}
+
 @test "add: --add exits 125 when sentinel comment is missing" {
     cat > "$FIXTURE_DIR/flake.nix" <<'FLAKE'
 { outputs = { self, nixpkgs }: {

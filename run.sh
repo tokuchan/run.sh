@@ -872,6 +872,25 @@ pkg_add() {
     log_warn "added '$pkg' to flake.nix — run 'run true' to pre-warm the nix store"
 }
 
+# §13.03 pkg_remove
+pkg_remove() {
+    local pkg="$1"
+    local flake="${RUN_RUN_ROOT}/flake.nix"
+
+    if [ ! -f "$flake" ]; then
+        log_error "flake.nix not found at $flake; cannot remove package"
+        exit 125
+    fi
+
+    if ! grep -qE "^[[:space:]]+${pkg}[[:space:]]*$" "$flake"; then
+        log_warn "package '$pkg' not found in flake.nix; nothing to do"
+        return 0
+    fi
+
+    sed -i "/^[[:space:]]*${pkg}[[:space:]]*$/d" "$flake"
+    log_warn "removed '$pkg' from flake.nix"
+}
+
 # §13.04 manage_packages
 # Runs --search, then --add, then --remove. Called from main after manage_image.
 manage_packages() {
@@ -884,6 +903,11 @@ manage_packages() {
 
     for pkg in ${RUN_PKG_ADD:-}; do
         pkg_add "$pkg"
+        did_something=1
+    done
+
+    for pkg in ${RUN_PKG_REMOVE:-}; do
+        pkg_remove "$pkg"
         did_something=1
     done
 
