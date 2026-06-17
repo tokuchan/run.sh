@@ -43,9 +43,25 @@
       };
 
       # ── Dev shell ──────────────────────────────────────────────────────
-      # Host-side tools for developing run.sh before the container is ready.
+      # Primary toolchain: all tools needed to develop and test run.sh.
+      # Consumed via 'nix develop' inside the container (run.sh devShell mode).
       devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [ bats shellcheck ];
+        packages = with pkgs; [
+          # Runtime requirements of run.sh
+          bash
+          coreutils       # date, mktemp, readlink, dirname, id, …
+          findutils       # find
+          gnused          # sed
+          gnugrep         # grep
+          util-linux      # script (PTY allocation for bats TTY tests)
+
+          # VCS tools (run root detection)
+          git
+
+          # Test runner and linter
+          bats
+          shellcheck
+        ];
       };
     };
 }

@@ -84,8 +84,8 @@ Run 'run --help' for the full manual with all options and examples.
 EOF
 }
 
-# §01.02 help
-help() {
+# §01.02a _help_body — raw help text (consumed by help())
+_help_body() {
     cat <<'EOF'
 NAME
     run — run containerized commands in your dev environment
@@ -198,6 +198,25 @@ EXAMPLES
     run --force-rebuild make all       # rebuild image then run
     run --clean                        # remove image
 EOF
+}
+
+# §01.02 help
+help() {
+    local pager=""
+    if [ -t 1 ]; then
+        if [ -n "${PAGER:-}" ]; then
+            pager="$PAGER"
+        elif command -v less >/dev/null 2>&1; then
+            pager="less -FRX"
+        elif command -v more >/dev/null 2>&1; then
+            pager="more"
+        fi
+    fi
+    if [ -n "$pager" ]; then
+        _help_body | $pager
+    else
+        _help_body
+    fi
 }
 
 # §01.03 do_init
