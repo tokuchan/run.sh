@@ -28,3 +28,10 @@ EOF
     script -q -c "PAGER=$FAKE_PAGER $RUN_SH --help" /dev/null
     [ -f "$FAKE_PAGER_LOG" ]
 }
+
+@test "help: no pager when stdout is not a TTY" {
+    setup_fake_pager
+    PAGER="$FAKE_PAGER" run "$RUN_SH" --help
+    [ "$status" -eq 0 ]
+    [ ! -f "$FAKE_PAGER_LOG" ]
+}
