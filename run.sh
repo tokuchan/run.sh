@@ -360,7 +360,7 @@ log_error() { _log "ERROR" 0 "$@"; }
 # §03.03  apply_env()     — apply RUN_* env overrides
 # §03.04  parse_args()    — command-line option parsing
 
-_KNOWN_KEYS="image runtime stems project_root verbose quiet dry_run cwd env_host tty build rebuild force_rebuild store"
+_KNOWN_KEYS="image runtime stems project_root verbose quiet dry_run cwd env_host tty build rebuild force_rebuild store timeout"
 
 # §03.01 defaults
 defaults() {
@@ -384,6 +384,7 @@ defaults() {
     RUN_PKG_SEARCH="${RUN_PKG_SEARCH:-}"
     RUN_PKG_ADD="${RUN_PKG_ADD:-}"
     RUN_PKG_REMOVE="${RUN_PKG_REMOVE:-}"
+    RUN_TIMEOUT="${RUN_TIMEOUT:-0}"
 }
 
 # §03.02 parse_conf
@@ -418,6 +419,7 @@ parse_conf() {
             rebuild)      RUN_REBUILD="$value" ;;
             force_rebuild) RUN_FORCE_REBUILD="$value" ;;
             store)        RUN_STORE="$value" ;;
+            timeout)      RUN_TIMEOUT="$value" ;;
         esac
     done < "$conf_file"
 }
@@ -468,6 +470,7 @@ parse_args() {
             --init-container) RUN_INIT_CONTAINER=1; shift ;;
             --init-flake)  RUN_INIT_FLAKE=1; shift ;;
             --init-config) RUN_INIT_CONFIG=1; shift ;;
+            --timeout)     RUN_TIMEOUT="$2"; shift 2 ;;
             --search)      RUN_PKG_SEARCH="$2"; shift 2 ;;
             --add)         RUN_PKG_ADD="$RUN_PKG_ADD $2"; shift 2 ;;
             --remove)      RUN_PKG_REMOVE="$RUN_PKG_REMOVE $2"; shift 2 ;;
@@ -802,6 +805,9 @@ dry_run_print() {
     else
         printf '%s [INFO ] run: dry-run image=%s command: %s\n' \
             "$ts" "${RUN_IMAGE:-<unset>}" "$RUN_USER_CMD" >&2
+    fi
+    if [ "${RUN_TIMEOUT:-0}" != "0" ]; then
+        printf '%s [INFO ] run: dry-run timeout=%ss\n' "$ts" "$RUN_TIMEOUT" >&2
     fi
 }
 

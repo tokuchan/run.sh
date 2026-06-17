@@ -12,6 +12,9 @@ Versions are date codes: `YYYY-MM-DD`.
 - SGR terminal formatting for `--help` section/subsection headers (bold+cyan
   sections, bold subsections); suppressed when stdout is not a TTY or `NO_COLOR`
   is set
+- `--timeout <seconds>` / `RUN_TIMEOUT` / `timeout` in `run.conf`: kills the
+  container and exits 124 when the run-time limit is exceeded; `0` means no
+  limit (default); implies `--no-tty`
 
 ## [2026-06-17]
 
