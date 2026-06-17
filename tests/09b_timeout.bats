@@ -21,3 +21,8 @@ teardown() { teardown_fixture; }
     FAKE_RUNTIME_HANG=5 run "$RUN_SH" --timeout 1 echo hi
     [ "$status" -eq 124 ]
 }
+
+@test "timeout: propagates exit code when command finishes before timeout" {
+    FAKE_RUNTIME_EXIT=42 run "$RUN_SH" --timeout 30 echo hi
+    [ "$status" -eq 42 ]
+}
