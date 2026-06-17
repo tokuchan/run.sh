@@ -70,3 +70,41 @@ SSH-style: `-v`/`--verbose` (repeatable for more detail) and `-q`/`--quiet` (sup
 
 ### Dry run
 `--dry-run` / `RUN_DRY_RUN=1`. Prints the fully-resolved container invocation — image, mounts, env flags, command — without executing it.
+
+### Auto-build
+Automatic construction of the container image when it is absent from the local runtime. On by default; suppressed with `--no-build` / `RUN_NO_BUILD=1`. When triggered, run.sh runs `<runtime> build -t <image> <run-root>` using `<run-root>/Dockerfile` as the build file (convention, not configurable). Handled in §07 image management, after config and env are applied but before stem resolution. With the nix-store-on-host architecture, the image is thin (no packages baked in), so auto-build is rarely triggered after the first run.
+
+### Package install fingerprint
+A potential future optimisation: hash `flake.nix` + `flake.lock` and store the result to detect when `nix develop` evaluation can be skipped. Not implemented in the current iteration — `nix develop --command` is self-managing and its per-invocation evaluation overhead is acceptable. May be revisited if startup latency becomes a concern.
+
+### Command forwarding (devShell mode)
+Instead of `--entrypoint bash -c '"$@"' -- <cmd>`, run.sh forwards the user command via `nix develop <run-root> --command bash -c '"$@"' -- <cmd>` inside the container. `nix develop` evaluates the flake's `devShells.default`, sets up PATH and environment, downloads any missing packages into the mounted nix store, then runs the command. The run root is available inside the container at its host absolute path (via the project root mirror).
+
+### Image management
+The §07 section of run.sh. Runs after `apply_env`, before stem resolution. Sequence: detect runtime → `--clean` (rmi + exit if requested) → image-absent check (auto-build if missing) → staleness check (auto-rebuild if stale). Dry-run mode includes §07 — it shows what image would be used and whether a build is needed — but still skips `invoke_container`.
+
+### Auto-rebuild
+Automatic reconstruction of the container image when it is present but stale. On by default; suppressed with `--no-rebuild` / `RUN_NO_REBUILD=1`. Staleness is determined by hashing `Dockerfile` and `flake.nix` at the run root and comparing against a fingerprint stored as a `run.fingerprint` label on the image (set at build time via `--label`). Stale if the hashes differ. `--no-rebuild` does not imply `--no-build` — a missing image is still built even when rebuild is suppressed.
+
+### Force-rebuild
+An explicit `--force-rebuild` / `RUN_FORCE_REBUILD=1` flag that triggers a full image rebuild unconditionally, bypassing the staleness check. The image label fingerprint is updated correctly after the build. Does not imply `--clean` — the old image layers are replaced in place by the runtime.
+
+### Clean
+`--clean` removes the container image from the local runtime (`<runtime> rmi <image>`) and exits immediately without running a command or rebuilding. Used to free disk space or force a fully fresh build on the next invocation.
+
+### Init
+A starter file written by `run.sh` to bootstrap a new project. Three init flags exist: `--init-container` writes `Dockerfile`, `--init-flake` writes `flake.nix`, `--init-config` writes `run.conf`. `--init` is shorthand for all three. Init files are always written to CWD — run.sh does not attempt run root detection in init mode. Writing `run.conf` to CWD marks CWD as the run root for all future invocations from that directory. If the target file already exists, `run.sh` emits a warning and skips that file — it never clobbers existing content. If VCS root detection would have resolved a different directory than CWD, an informational log message notes the discrepancy. Init flags cause immediate exit after writing; they cannot be combined with a command invocation.
+
+`.gitignore` is handled specially: `--init` (or `--init-container`) performs a smart append — adding `fs/default/nix/` and `result` only if those entries are not already present. `.gitignore` is never skipped or clobbered wholesale; it is created if absent or appended to if present.
+
+### Toolchain specifier
+`flake.nix` is the sole authoritative source of what packages are available inside the container. The `Dockerfile` is sealed infrastructure (installs Nix and enables flakes only — no packages) and must not be edited to add packages. Users add tools by editing `flake.nix`. Packages are installed at runtime into a host-side nix store that is mounted into the container, not baked into the image at build time. This separation is enforced by convention and documented in ADR-0008. A future iteration may add `run add <package>` / `run search <package>` commands to manage `flake.nix` without hand-editing, analogous to `uv add`.
+
+### Nix store — local mode
+The nix store lives inside the project's `fs/default/nix/` directory, mounted at `/nix` inside the container. Each project has an isolated store. Used for hermetic projects. `fs/default/nix/` must be gitignored. Selected by `store = local` in `run.conf` (or `RUN_STORE=local` / `--store local`).
+
+### Nix store mount
+A special-purpose mount constructed in §07 alongside the image management phase, using the same mechanism as CWD mirror and project root mirror (appended directly to `RUN_MOUNT_PAIRS`). The host path is resolved from the `store` config key — shared mode uses `$XDG_CACHE_HOME/run/nix/`; local mode uses `<run-root>/fs/default/nix/`. The directory is created if absent. Always mounted at `/nix` inside the container.
+
+### Nix store — shared mode
+The nix store lives in an XDG-compliant cache directory on the host (e.g. `$XDG_CACHE_HOME/run/nix/`, defaulting to `~/.cache/run/nix/`) and is shared across all projects. Safe to share because the Nix store is content-addressed — different package versions have different hashes and coexist without conflict. This is the preferred default for most projects. Eliminates gigabytes of per-project duplicates. Documented in ADR-0012.

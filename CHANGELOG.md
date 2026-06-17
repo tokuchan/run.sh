@@ -6,6 +6,27 @@ Versions are date codes: `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Added
+- `--init` / `--init-container` / `--init-flake` / `--init-config` flags to
+  bootstrap a new project (writes `Dockerfile`, `flake.nix`, `run.conf`,
+  updates `.gitignore`); never clobbers existing files
+- Auto-build: builds container image automatically when absent (opt-out via
+  `--no-build`)
+- Auto-rebuild: detects stale image via `run.fingerprint` label and rebuilds
+  automatically (opt-out via `--no-rebuild`)
+- `--force-rebuild`: bypass staleness check and rebuild unconditionally
+- `--clean`: remove container image and exit
+- `§07` image management section: runtime detection, build/rebuild/clean
+  handling, nix store mount — runs before stem resolution
+- Nix store mounted from host (`$XDG_CACHE_HOME/run/nix/` shared by default,
+  `fs/default/nix/` for hermetic local mode); divorces package management from
+  container image lifecycle
+- `store = local|shared` three-surface setting (`RUN_STORE`, `--store`)
+- `flake.nix` init stub uses `devShells.default` (via `nix develop --command`);
+  drops `dockerTools.buildLayeredImage` — packages installed at runtime
+- `docs/adr/0008` – `0012`: ADRs for flake-as-sole-specifier, dry-run
+  immutability, no-args safety, nix-store-on-host, XDG shared store
+
 ## [2026-06-15]
 
 ### Added
