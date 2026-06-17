@@ -59,3 +59,16 @@ FLAKE
     # bash should appear exactly once (not duplicated)
     [ "$(grep -c "^[[:space:]]*bash[[:space:]]*$" "$FIXTURE_DIR/flake.nix")" -eq 1 ]
 }
+
+@test "add: --add exits 125 when sentinel comment is missing" {
+    cat > "$FIXTURE_DIR/flake.nix" <<'FLAKE'
+{ outputs = { self, nixpkgs }: {
+    devShells.x86_64-linux.default = (import nixpkgs {}).mkShell {
+      packages = with (import nixpkgs {}); [ bash ];
+    };
+  };
+}
+FLAKE
+    run "$RUN_SH" --add ripgrep
+    [ "$status" -eq 125 ]
+}
