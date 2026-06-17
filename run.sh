@@ -869,7 +869,7 @@ pkg_add() {
     fi
 
     sed -i "s|${sentinel}|        ${pkg}\n        ${sentinel}|" "$flake"
-    log_info "added '$pkg' to flake.nix; run 'run true' to pre-warm the nix store"
+    log_warn "added '$pkg' to flake.nix — run 'run true' to pre-warm the nix store"
 }
 
 # §13.04 manage_packages

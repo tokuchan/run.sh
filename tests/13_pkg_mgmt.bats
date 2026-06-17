@@ -60,6 +60,13 @@ FLAKE
     [ "$(grep -c "^[[:space:]]*bash[[:space:]]*$" "$FIXTURE_DIR/flake.nix")" -eq 1 ]
 }
 
+@test "add: --add prints pre-warm suggestion after inserting package" {
+    write_flake
+    run bash -c "$RUN_SH --add ripgrep 2>&1"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qi "run true"
+}
+
 @test "add: --add exits 125 when sentinel comment is missing" {
     cat > "$FIXTURE_DIR/flake.nix" <<'FLAKE'
 { outputs = { self, nixpkgs }: {
