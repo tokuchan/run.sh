@@ -47,3 +47,19 @@ EOF
     script -q -c "unset PAGER; PATH=$FIXTURE_DIR/bin:\$PATH $RUN_SH --help" /dev/null
     grep -q "\-FRX" "$FAKE_LESS_LOG"
 }
+
+@test "help: falls back to more when less is absent" {
+    mkdir -p "$FIXTURE_DIR/bin"
+    FAKE_MORE_LOG="$FIXTURE_DIR/more.log"
+    printf '#!/bin/sh\nprintf called > %s\ncat\n' "$FAKE_MORE_LOG" > "$FIXTURE_DIR/bin/more"
+    chmod +x "$FIXTURE_DIR/bin/more"
+    # PATH has only more (no less), PAGER unset
+    script -q -c "unset PAGER; PATH=$FIXTURE_DIR/bin $RUN_SH --help" /dev/null
+    [ -f "$FAKE_MORE_LOG" ]
+}
+
+@test "help: falls back to cat when neither less nor more is found" {
+    # PATH has no pager at all — help text still reaches stdout unchanged
+    output=$(script -q -c "unset PAGER; PATH=/dev/null $RUN_SH --help" /dev/null 2>/dev/null | tr -d '\r' | head -3)
+    printf '%s\n' "$output" | grep -q "run"
+}
