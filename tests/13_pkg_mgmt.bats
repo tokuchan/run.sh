@@ -101,3 +101,11 @@ FLAKE
     run "$RUN_SH" --add ripgrep
     [ "$status" -eq 125 ]
 }
+
+# ── --init-flake ───────────────────────────────────────────────────────────────
+@test "init-flake: --init-flake writes flake.nix containing run:packages sentinel" {
+    run bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init-flake"
+    [ "$status" -eq 0 ]
+    [ -f "$FIXTURE_DIR/flake.nix" ]
+    grep -q "# run:packages" "$FIXTURE_DIR/flake.nix"
+}

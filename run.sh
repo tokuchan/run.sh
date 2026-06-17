@@ -254,12 +254,11 @@ DOCKERFILE
     in
     {
       devShells.${system}.default = pkgs.mkShell {
-        # Add your project tools here, e.g.:
-        #   packages = with pkgs; [ nodejs python3 rustc cargo ];
         packages = with pkgs; [
           bash
           coreutils
           git
+          # run:packages — managed by 'run --add / --remove'; do not delete this line
         ];
       };
     };
