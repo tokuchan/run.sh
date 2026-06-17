@@ -67,6 +67,14 @@ FLAKE
     echo "$output" | grep -qi "run true"
 }
 
+@test "add: --add is repeatable — two --add flags both insert packages" {
+    write_flake
+    run "$RUN_SH" --add ripgrep --add fd
+    [ "$status" -eq 0 ]
+    grep -q "ripgrep" "$FIXTURE_DIR/flake.nix"
+    grep -q "[[:space:]]fd$" "$FIXTURE_DIR/flake.nix"
+}
+
 @test "add: --add exits 125 when sentinel comment is missing" {
     cat > "$FIXTURE_DIR/flake.nix" <<'FLAKE'
 { outputs = { self, nixpkgs }: {
