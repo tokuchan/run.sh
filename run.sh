@@ -56,6 +56,7 @@ Common options:
   --mirror-ro <path>     Same, read-only
   --no-cwd               Do not mirror CWD and project root
   --no-env-host          Do not forward host environment
+  --timeout <secs>       Kill container and exit 124 after N seconds (0=off)
   --dry-run              Print resolved container invocation; do not run
   -v, --verbose          Increase log verbosity (repeatable: -vv)
   -q, --quiet            Suppress non-error output
@@ -151,6 +152,12 @@ ${SECTION}OPTIONS${RESET}
                              local   <run-root>/fs/default/nix
                            Store is seeded from image on first use.
 
+  ${SUBSECTION}Run-time limit:${RESET}
+    --timeout <secs>       Kill container and exit 124 after N seconds.
+                           0 (default) means no limit. Implies --no-tty.
+                           Configurable via run.conf (timeout = N) and
+                           RUN_TIMEOUT. Use --timeout 0 to override run.conf.
+
   ${SUBSECTION}Diagnostics:${RESET}
     --dry-run              Print resolved invocation to stderr; do not execute
     -v, --verbose          Increase verbosity (repeat for more: -vv, -vvv)
@@ -179,6 +186,7 @@ ${SECTION}LOG FORMAT${RESET}
 
 ${SECTION}EXIT CODES${RESET}
     Passes through the container command's exit code.
+    124  command timed out (--timeout)
     125  run.sh itself failed (bad config, missing runtime, etc.)
 
 ${SECTION}EXAMPLES${RESET}
