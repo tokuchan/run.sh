@@ -123,3 +123,12 @@ The comment `# run:packages` placed inside the `packages = with pkgs; [ ... ]` l
 
 ### Package pre-warm
 Running `run true` after `--add` to trigger `nix develop` and download newly-added packages into the nix store before the first real command invocation. Not automatic — `--add` prints an info-level suggestion to do this. The next real command invocation would trigger the download anyway; pre-warming just moves the latency to a moment the user expects it.
+
+### Help pager
+When `--help` is invoked and stdout is a terminal, run.sh pipes the full manual through a pager. Detection chain: `$PAGER` → `less` → `more` → `cat`. When `less` is selected directly (i.e. `$PAGER` is not set), it is invoked as `less -FRX` so that: content fitting on one screen exits immediately (`-F`), SGR codes render correctly (`-R`), and the screen is not cleared on exit (`-X`). When `$PAGER` is set, it is invoked verbatim.
+
+### SGR primitives
+Shell variables set at the start of `help()` to ANSI/SGR escape sequences, or to empty strings when SGR is suppressed. Names reflect visual role: `BOLD`, `DIM`, `RESET`, and color names (`RED`, `GREEN`, `CYAN`, `YELLOW`, `MAGENTA`). Set to empty when `$NO_COLOR` is set or stdout is not a terminal.
+
+### Help semantic variables
+Shell variables that express structural roles in the help text, defined in terms of SGR primitives. `SECTION` styles top-level section headers; `SUBSECTION` styles subsection labels within OPTIONS. Because they reference primitives, zeroing out the primitives (for `NO_COLOR` or non-TTY output) automatically strips all formatting without touching the help text itself.
