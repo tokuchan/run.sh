@@ -28,7 +28,10 @@ setup_fake_runtime() {
     FAKE_RUNTIME_EXIT="${FAKE_RUNTIME_EXIT:-0}"
     FAKE_IMAGE_EXISTS="${FAKE_IMAGE_EXISTS:-1}"
     FAKE_IMAGE_FINGERPRINT="${FAKE_IMAGE_FINGERPRINT:-}"
+    FAKE_NIX_EVAL_EXIT="${FAKE_NIX_EVAL_EXIT:-0}"
+    FAKE_NIX_SEARCH_OUTPUT="${FAKE_NIX_SEARCH_OUTPUT:-nixpkgs#nodejs  20.0  Node.js}"
     export FAKE_RUNTIME_LOG FAKE_RUNTIME_EXIT FAKE_IMAGE_EXISTS FAKE_IMAGE_FINGERPRINT
+    export FAKE_NIX_EVAL_EXIT FAKE_NIX_SEARCH_OUTPUT
 
     cat > "$bin_dir/podman" <<'EOF'
 #!/bin/sh
@@ -50,7 +53,13 @@ case "$1" in
         ;;
     rmi)   exit 0 ;;
     build) exit 0 ;;
-    run)   exit "$FAKE_RUNTIME_EXIT" ;;
+    run)
+        case "$*" in
+            *"nix search"*) printf '%s\n' "$FAKE_NIX_SEARCH_OUTPUT"; exit 0 ;;
+            *"nix eval"*)   exit "$FAKE_NIX_EVAL_EXIT" ;;
+            *)              exit "$FAKE_RUNTIME_EXIT" ;;
+        esac
+        ;;
     *)     exit 0 ;;
 esac
 EOF

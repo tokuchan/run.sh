@@ -349,6 +349,9 @@ defaults() {
     RUN_INIT_CONTAINER="${RUN_INIT_CONTAINER:-0}"
     RUN_INIT_FLAKE="${RUN_INIT_FLAKE:-0}"
     RUN_INIT_CONFIG="${RUN_INIT_CONFIG:-0}"
+    RUN_PKG_SEARCH="${RUN_PKG_SEARCH:-}"
+    RUN_PKG_ADD="${RUN_PKG_ADD:-}"
+    RUN_PKG_REMOVE="${RUN_PKG_REMOVE:-}"
 }
 
 # §03.02 parse_conf
@@ -433,6 +436,9 @@ parse_args() {
             --init-container) RUN_INIT_CONTAINER=1; shift ;;
             --init-flake)  RUN_INIT_FLAKE=1; shift ;;
             --init-config) RUN_INIT_CONFIG=1; shift ;;
+            --search)      RUN_PKG_SEARCH="$2"; shift 2 ;;
+            --add)         RUN_PKG_ADD="$RUN_PKG_ADD $2"; shift 2 ;;
+            --remove)      RUN_PKG_REMOVE="$RUN_PKG_REMOVE $2"; shift 2 ;;
             --help|-h)     help; exit 0 ;;
             -*)            log_error "unknown option: $1"; exit 125 ;;
             *)             RUN_USER_CMD="$*"; break ;;
@@ -824,6 +830,32 @@ _ENVS_
 }
 
 # ─────────────────────────────────────────────────────────────
+# §13 PACKAGE MANAGEMENT
+# ─────────────────────────────────────────────────────────────
+# §13.01  pkg_search()  — run nix search nixpkgs inside container
+# §13.02  pkg_add()     — validate + insert package above sentinel
+# §13.03  pkg_remove()  — delete package line from flake.nix
+
+# §13.01 pkg_search
+pkg_search() {
+    local term="$1"
+    "$RUN_RUNTIME" run --rm "$RUN_IMAGE" nix search nixpkgs "$term"
+}
+
+# §13.04 manage_packages
+# Runs --search, then --add, then --remove. Called from main after manage_image.
+manage_packages() {
+    local did_something=0
+
+    if [ -n "${RUN_PKG_SEARCH:-}" ]; then
+        pkg_search "$RUN_PKG_SEARCH"
+        did_something=1
+    fi
+
+    [ "$did_something" = "1" ] && exit 0
+}
+
+# ─────────────────────────────────────────────────────────────
 # §10 MAIN
 # ─────────────────────────────────────────────────────────────
 
@@ -872,6 +904,7 @@ main() {
     load_explicit_stems
     detect_runtime || exit 125
     manage_image
+    manage_packages
     mount_nix_store
 
     build_cwd_mounts

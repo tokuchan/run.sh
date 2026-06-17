@@ -108,3 +108,18 @@ A special-purpose mount constructed in §07 alongside the image management phase
 
 ### Nix store — shared mode
 The nix store lives in an XDG-compliant cache directory on the host (e.g. `$XDG_CACHE_HOME/run/nix/`, defaulting to `~/.cache/run/nix/`) and is shared across all projects. Safe to share because the Nix store is content-addressed — different package versions have different hashes and coexist without conflict. This is the preferred default for most projects. Eliminates gigabytes of per-project duplicates. Documented in ADR-0012.
+
+### Package management
+The set of three management flags — `--add <pkg>`, `--remove <pkg>`, `--search <term>` — that let users modify `flake.nix` without hand-editing. All three are management operations: they exit without running a container command, just as `--init` and `--clean` do. When combined in one invocation, they execute in order: `--search` first (prints results), then `--add` operations, then `--remove` operations. `manage_image` (auto-build) runs before any package operation since a container is needed to run nix commands. Inspired by `uv add` / `uv remove`.
+
+### Nix attribute path
+The exact identifier for a package in the nixpkgs attribute set, used as the argument to `--add` and `--remove`. Examples: `nodejs`, `python311`, `rustc`, `ripgrep`. Must match an attribute that exists in nixpkgs exactly — `--add` validates existence via `nix eval nixpkgs#<name>` inside the container before editing `flake.nix`. Wrong names are rejected immediately with exit 125.
+
+### Package sentinel
+The comment `# run:packages` placed inside the `packages = with pkgs; [ ... ]` list in `flake.nix`. Acts as an insertion point for `--add` (inserts a new line above it via sed) and an anchor for `--remove` (deletes the target package line). Written by `--init-flake` with a note that it must not be removed. If the sentinel is absent when `--add` or `--remove` is called, run.sh exits 125 with a clear error directing the user to add packages manually. Documented in ADR-0013.
+
+### Package search
+`--search <term>` runs `nix search nixpkgs <term>` inside the container and prints the results to stdout. Used for discovery when the exact nix attribute path is unknown. Exits 0 after printing. Output is the raw nix search output — package names, versions, descriptions. Combine with `--add` in a separate invocation once the exact attribute path is identified.
+
+### Package pre-warm
+Running `run true` after `--add` to trigger `nix develop` and download newly-added packages into the nix store before the first real command invocation. Not automatic — `--add` prints an info-level suggestion to do this. The next real command invocation would trigger the download anyway; pre-warming just moves the latency to a moment the user expects it.

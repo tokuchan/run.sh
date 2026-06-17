@@ -26,6 +26,9 @@ Versions are date codes: `YYYY-MM-DD`.
   drops `dockerTools.buildLayeredImage` — packages installed at runtime
 - `docs/adr/0008` – `0012`: ADRs for flake-as-sole-specifier, dry-run
   immutability, no-args safety, nix-store-on-host, XDG shared store
+- `--search <term>`: runs `nix search nixpkgs <term>` inside the container
+  to discover package attribute paths; exits after printing results
+- `docs/adr/0013`: sentinel comment as insertion anchor for `--add`/`--remove`
 
 ## [2026-06-15]
 
