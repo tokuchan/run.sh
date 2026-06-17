@@ -32,3 +32,10 @@ teardown() { teardown_fixture; }
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"--tty ignored"* ]]
 }
+
+@test "timeout: timeout key in run.conf is accepted" {
+    write_run_conf "image = test:latest" "timeout = 30"
+    run --separate-stderr "$RUN_SH" --dry-run echo hi
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"timeout=30s"* ]]
+}
