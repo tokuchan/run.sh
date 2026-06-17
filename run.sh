@@ -811,6 +811,52 @@ dry_run_print() {
     fi
 }
 
+# §09.02a _invoke_with_timeout — run container in background with a timer
+# Called by invoke_container when RUN_TIMEOUT > 0. Runs container in background
+# (no TTY), starts a sleep timer in a subshell. Timer fires -> kill container
+# process + touch sentinel. Parent waits for container; sentinel presence
+# distinguishes timeout from normal exit. Exits 124 on timeout.
+_invoke_with_timeout() {
+    local _cname="run-$$"
+    local _sentinel="/tmp/run-timeout-$$"
+    rm -f "$_sentinel"
+
+    # Warn if user explicitly requested TTY (timeout implies --no-tty)
+    if [ "${RUN_TTY:-auto}" = "1" ]; then
+        log_warn "--tty ignored: --timeout implies no TTY"
+    fi
+
+    # Run container in background without TTY; args already built by invoke_container
+    if [ "${RUN_DEVSHELL:-0}" = "1" ]; then
+        "$RUN_RUNTIME" run --name "$_cname" "$@" "$RUN_IMAGE" \
+            nix develop "path:$RUN_RUN_ROOT" --command $RUN_USER_CMD &
+    else
+        "$RUN_RUNTIME" run --name "$_cname" --entrypoint bash "$@" "$RUN_IMAGE" \
+            -c '"$@"' -- $RUN_USER_CMD &
+    fi
+    local _cpid=$!
+
+    # Background timer: write sentinel FIRST so parent sees it after wait returns,
+    # then kill the docker run process and stop the container gracefully.
+    ( sleep "$RUN_TIMEOUT" && touch "$_sentinel" && \
+      kill "$_cpid" 2>/dev/null && \
+      "$RUN_RUNTIME" stop "$_cname" 2>/dev/null ) &
+    local _tpid=$!
+
+    wait "$_cpid"
+    local _exit=$?
+
+    kill "$_tpid" 2>/dev/null
+    wait "$_tpid" 2>/dev/null
+
+    if [ -f "$_sentinel" ]; then
+        rm -f "$_sentinel"
+        log_error "command timed out after ${RUN_TIMEOUT}s"
+        exit 124
+    fi
+    return "$_exit"
+}
+
 # §09.02 invoke_container
 # Build and exec the container command. Uses here-doc redirections (not pipes)
 # to iterate over mount/env pairs while staying in the current shell so that
@@ -856,7 +902,9 @@ _ENVS_
     [ -n "${RUN_WORKDIR:-}" ] && set -- "$@" --workdir "$RUN_WORKDIR"
 
     # Execute and propagate exit code
-    if [ "${RUN_DEVSHELL:-0}" = "1" ]; then
+    if [ "${RUN_TIMEOUT:-0}" != "0" ]; then
+        _invoke_with_timeout "$@"
+    elif [ "${RUN_DEVSHELL:-0}" = "1" ]; then
         # devShell mode: nix develop resolves all packages then forwards the command
         "$RUN_RUNTIME" run "$@" "$RUN_IMAGE" \
             nix develop "path:$RUN_RUN_ROOT" --command $RUN_USER_CMD

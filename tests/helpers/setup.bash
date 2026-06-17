@@ -19,6 +19,7 @@ teardown_fixture() {
 #
 # Control variables (export before setup or per-test):
 #   FAKE_RUNTIME_EXIT       — exit code for 'run' subcommand (default: 0)
+#   FAKE_RUNTIME_HANG       — seconds the 'run' subcommand sleeps before exiting (default: 0)
 #   FAKE_IMAGE_EXISTS       — "1" means image inspect succeeds (default: 1)
 #   FAKE_IMAGE_FINGERPRINT  — value returned for run.fingerprint label (default: "")
 setup_fake_runtime() {
@@ -26,11 +27,12 @@ setup_fake_runtime() {
     mkdir -p "$bin_dir"
     FAKE_RUNTIME_LOG="$FIXTURE_DIR/runtime.log"
     FAKE_RUNTIME_EXIT="${FAKE_RUNTIME_EXIT:-0}"
+    FAKE_RUNTIME_HANG="${FAKE_RUNTIME_HANG:-0}"
     FAKE_IMAGE_EXISTS="${FAKE_IMAGE_EXISTS:-1}"
     FAKE_IMAGE_FINGERPRINT="${FAKE_IMAGE_FINGERPRINT:-}"
     FAKE_NIX_EVAL_EXIT="${FAKE_NIX_EVAL_EXIT:-0}"
     FAKE_NIX_SEARCH_OUTPUT="${FAKE_NIX_SEARCH_OUTPUT:-nixpkgs#nodejs  20.0  Node.js}"
-    export FAKE_RUNTIME_LOG FAKE_RUNTIME_EXIT FAKE_IMAGE_EXISTS FAKE_IMAGE_FINGERPRINT
+    export FAKE_RUNTIME_LOG FAKE_RUNTIME_EXIT FAKE_RUNTIME_HANG FAKE_IMAGE_EXISTS FAKE_IMAGE_FINGERPRINT
     export FAKE_NIX_EVAL_EXIT FAKE_NIX_SEARCH_OUTPUT
 
     cat > "$bin_dir/podman" <<'EOF'
@@ -53,11 +55,15 @@ case "$1" in
         ;;
     rmi)   exit 0 ;;
     build) exit 0 ;;
+    stop)  exit 0 ;;
     run)
         case "$*" in
             *"nix search"*) printf '%s\n' "$FAKE_NIX_SEARCH_OUTPUT"; exit 0 ;;
             *"nix eval"*)   exit "$FAKE_NIX_EVAL_EXIT" ;;
-            *)              exit "$FAKE_RUNTIME_EXIT" ;;
+            *)
+                [ "${FAKE_RUNTIME_HANG:-0}" -gt 0 ] && sleep "$FAKE_RUNTIME_HANG"
+                exit "$FAKE_RUNTIME_EXIT"
+                ;;
         esac
         ;;
     *)     exit 0 ;;

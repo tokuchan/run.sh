@@ -16,3 +16,8 @@ teardown() { teardown_fixture; }
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"timeout=30s"* ]]
 }
+
+@test "timeout: exits 124 when container exceeds timeout" {
+    FAKE_RUNTIME_HANG=5 run "$RUN_SH" --timeout 1 echo hi
+    [ "$status" -eq 124 ]
+}
