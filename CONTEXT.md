@@ -132,3 +132,9 @@ Shell variables set at the start of `help()` to ANSI/SGR escape sequences, or to
 
 ### Help semantic variables
 Shell variables that express structural roles in the help text, defined in terms of SGR primitives. `SECTION` styles top-level section headers; `SUBSECTION` styles subsection labels within OPTIONS. Because they reference primitives, zeroing out the primitives (for `NO_COLOR` or non-TTY output) automatically strips all formatting without touching the help text itself.
+
+### Run-time limit
+A maximum wall-clock duration for the container command, set via `--timeout <seconds>` / `RUN_TIMEOUT` / `timeout` in `run.conf`. When exceeded, run.sh stops the container with `docker stop` and exits 124. `0` means no limit (the default). Applies to the container run only — not to auto-build or auto-rebuild. Implies `--no-tty` because the implementation runs the container detached. Documented in ADR-0015.
+
+### Timeout sentinel
+A temporary file written by the background timer subshell when it fires (`docker stop` is called). Its presence after `docker wait` returns distinguishes a timeout exit from a normal or user-interrupted exit. Cleaned up immediately after inspection.
