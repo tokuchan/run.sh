@@ -16,17 +16,43 @@ teardown_fixture() {
 
 # Inject a fake container runtime into PATH that records its invocation.
 # Sets FAKE_RUNTIME_LOG to the capture file.
+#
+# Control variables (export before setup or per-test):
+#   FAKE_RUNTIME_EXIT       — exit code for 'run' subcommand (default: 0)
+#   FAKE_IMAGE_EXISTS       — "1" means image inspect succeeds (default: 1)
+#   FAKE_IMAGE_FINGERPRINT  — value returned for run.fingerprint label (default: "")
 setup_fake_runtime() {
     local bin_dir="$FIXTURE_DIR/bin"
     mkdir -p "$bin_dir"
     FAKE_RUNTIME_LOG="$FIXTURE_DIR/runtime.log"
     FAKE_RUNTIME_EXIT="${FAKE_RUNTIME_EXIT:-0}"
-    export FAKE_RUNTIME_LOG FAKE_RUNTIME_EXIT
+    FAKE_IMAGE_EXISTS="${FAKE_IMAGE_EXISTS:-1}"
+    FAKE_IMAGE_FINGERPRINT="${FAKE_IMAGE_FINGERPRINT:-}"
+    export FAKE_RUNTIME_LOG FAKE_RUNTIME_EXIT FAKE_IMAGE_EXISTS FAKE_IMAGE_FINGERPRINT
 
     cat > "$bin_dir/podman" <<'EOF'
 #!/bin/sh
 echo "$@" >> "$FAKE_RUNTIME_LOG"
-exit "$FAKE_RUNTIME_EXIT"
+case "$1" in
+    image)
+        case "$2" in
+            inspect)
+                if [ "$FAKE_IMAGE_EXISTS" = "1" ]; then
+                    case "$*" in
+                        *run.fingerprint*) printf '%s\n' "$FAKE_IMAGE_FINGERPRINT" ;;
+                    esac
+                    exit 0
+                else
+                    exit 1
+                fi
+                ;;
+        esac
+        ;;
+    rmi)   exit 0 ;;
+    build) exit 0 ;;
+    run)   exit "$FAKE_RUNTIME_EXIT" ;;
+    *)     exit 0 ;;
+esac
 EOF
     chmod +x "$bin_dir/podman"
     cp "$bin_dir/podman" "$bin_dir/docker"

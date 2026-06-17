@@ -27,7 +27,7 @@
 # §04  RUN ROOT & PROJECT ROOT
 # §05  STEM RESOLUTION
 # §06  MOUNT CONSTRUCTION
-# §07  ENVIRONMENT CONSTRUCTION
+# §07  IMAGE MANAGEMENT
 # §08  RUNTIME DETECTION & UID MAPPING
 # §09  CONTAINER INVOCATION
 # §10  MAIN
@@ -36,8 +36,9 @@
 # ─────────────────────────────────────────────────────────────
 # §01 HELP & USAGE
 # ─────────────────────────────────────────────────────────────
-# §01.01  usage()  — single-screen cheat sheet
-# §01.02  help()   — full manual
+# §01.01  usage()   — single-screen cheat sheet
+# §01.02  help()    — full manual
+# §01.03  do_init() — write stub files to CWD and exit
 
 # §01.01 usage
 usage() {
@@ -58,6 +59,19 @@ Common options:
   -q, --quiet            Suppress non-error output
   --runtime <r>          Container runtime: podman (default) or docker
   --help                 Show full manual
+
+Image management (all default on; use --no-* to suppress):
+  --build / --no-build        Auto-build image when absent
+  --rebuild / --no-rebuild    Auto-rebuild when Dockerfile fingerprint changes
+  --force-rebuild             Rebuild unconditionally
+  --clean                     Remove image and exit
+  --store <mode>              Nix store: shared (default) or local
+
+Bootstrap:
+  --init                 Write Dockerfile, flake.nix, and run.conf to CWD
+  --init-container       Write Dockerfile only
+  --init-flake           Write flake.nix only
+  --init-config          Write run.conf only
 
 Stem files (resolved from run root):
   default.run / default.env   always loaded first
@@ -122,11 +136,30 @@ OPTIONS
     --image <img>          Container image (overrides run.conf)
     --tty / --no-tty       Allocate pseudo-TTY (default: auto-detect)
 
+  Image management:
+    --build / --no-build        Auto-build image when absent (default: on)
+    --rebuild / --no-rebuild    Auto-rebuild when Dockerfile fingerprint
+                                changes (default: on)
+    --force-rebuild             Rebuild unconditionally regardless of fingerprint
+    --clean                     Remove image and exit 0
+
+  Nix store:
+    --store <mode>         Mount mode for /nix inside container:
+                             shared  XDG_CACHE_HOME/run/nix (default)
+                             local   <run-root>/fs/default/nix
+                           Store is seeded from image on first use.
+
   Diagnostics:
     --dry-run              Print resolved invocation to stderr; do not execute
     -v, --verbose          Increase verbosity (repeat for more: -vv, -vvv)
     -q, --quiet            Suppress non-error log output
     --project-root <path>  Override project root detection
+
+  Bootstrap (writes stub files to CWD; never clobbers existing files):
+    --init                 Write Dockerfile, flake.nix, and run.conf
+    --init-container       Write Dockerfile (and append .gitignore entries)
+    --init-flake           Write flake.nix with devShells.default
+    --init-config          Write run.conf with image placeholder
 
   General:
     -h, --help             Show this manual
@@ -147,12 +180,115 @@ EXIT CODES
     125  run.sh itself failed (bad config, missing runtime, etc.)
 
 EXAMPLES
+    # Bootstrap a new project
+    run --init                         # write Dockerfile, flake.nix, run.conf
+    $EDITOR flake.nix                  # add your packages to devShells.default
+    run make all                       # image built automatically on first run
+
+    # Daily use
     run g++ -o hello hello.cpp
     run -s nix nix build .
     run --mirror ~/.config -- nvim src/main.c
     run --dry-run make all
     ln -s run.sh g++ && ./g++ -o hello hello.cpp
+
+    # Image management
+    run --force-rebuild make all       # rebuild image then run
+    run --clean                        # remove image
 EOF
+}
+
+# §01.03 do_init
+# Write stub files to CWD based on RUN_INIT_* flags. Never clobbers.
+# Smart-appends .gitignore. Exits 0 when done.
+do_init() {
+    local wrote=0
+
+    if [ "${RUN_INIT_CONTAINER:-0}" = "1" ]; then
+        if [ -f "Dockerfile" ]; then
+            log_warn "Dockerfile already exists, skipping"
+        else
+            cat > "Dockerfile" <<'DOCKERFILE'
+FROM nixos/nix:latest
+
+# Enable flakes; disable sandbox (required inside containers).
+RUN echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf \
+    && echo "sandbox = false" >> /etc/nix/nix.conf
+
+# DO NOT add packages here. Declare all project tools in flake.nix instead.
+# The nix store is mounted from the host — packages install on first run
+# and are cached across invocations. See docs/adr/0008 and docs/adr/0011.
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
+DOCKERFILE
+            log_info "wrote Dockerfile"
+            wrote=1
+        fi
+
+        # Smart-append .gitignore entries
+        for _entry in "fs/default/nix/" "result"; do
+            if [ -f ".gitignore" ] && grep -qF "$_entry" ".gitignore"; then
+                :
+            else
+                printf '%s\n' "$_entry" >> ".gitignore"
+            fi
+        done
+    fi
+
+    if [ "${RUN_INIT_FLAKE:-0}" = "1" ]; then
+        if [ -f "flake.nix" ]; then
+            log_warn "flake.nix already exists, skipping"
+        else
+            cat > "flake.nix" <<'FLAKE'
+{
+  description = "run.sh dev environment";
+
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+
+  outputs = { self, nixpkgs }:
+    let
+      # Change x86_64-linux to aarch64-linux for ARM hosts.
+      system = "x86_64-linux";
+      pkgs   = nixpkgs.legacyPackages.${system};
+    in
+    {
+      devShells.${system}.default = pkgs.mkShell {
+        # Add your project tools here, e.g.:
+        #   packages = with pkgs; [ nodejs python3 rustc cargo ];
+        packages = with pkgs; [
+          bash
+          coreutils
+          git
+        ];
+      };
+    };
+}
+FLAKE
+            log_info "wrote flake.nix"
+            wrote=1
+        fi
+    fi
+
+    if [ "${RUN_INIT_CONFIG:-0}" = "1" ]; then
+        if [ -f "run.conf" ]; then
+            log_warn "run.conf already exists, skipping"
+        else
+            cat > "run.conf" <<'RUNCONF'
+# run.conf — project configuration for run.sh
+# Precedence: CLI option > RUN_* env var > this file > built-in default.
+
+image   = run-toolchain:latest
+runtime = podman
+# store = shared   # shared (default) or local (hermetic, per-project)
+RUNCONF
+            log_info "wrote run.conf"
+            wrote=1
+        fi
+    fi
+
+    [ "$wrote" = "0" ] && log_info "nothing to write"
+    exit 0
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -192,7 +328,7 @@ log_error() { _log "ERROR" 0 "$@"; }
 # §03.03  apply_env()     — apply RUN_* env overrides
 # §03.04  parse_args()    — command-line option parsing
 
-_KNOWN_KEYS="image runtime stems project_root verbose quiet dry_run cwd env_host tty"
+_KNOWN_KEYS="image runtime stems project_root verbose quiet dry_run cwd env_host tty build rebuild force_rebuild store"
 
 # §03.01 defaults
 defaults() {
@@ -205,6 +341,14 @@ defaults() {
     RUN_CWD="${RUN_CWD:-1}"
     RUN_ENV_HOST="${RUN_ENV_HOST:-1}"
     RUN_TTY="${RUN_TTY:-auto}"
+    RUN_BUILD="${RUN_BUILD:-1}"
+    RUN_REBUILD="${RUN_REBUILD:-1}"
+    RUN_FORCE_REBUILD="${RUN_FORCE_REBUILD:-0}"
+    RUN_CLEAN="${RUN_CLEAN:-0}"
+    RUN_STORE="${RUN_STORE:-shared}"
+    RUN_INIT_CONTAINER="${RUN_INIT_CONTAINER:-0}"
+    RUN_INIT_FLAKE="${RUN_INIT_FLAKE:-0}"
+    RUN_INIT_CONFIG="${RUN_INIT_CONFIG:-0}"
 }
 
 # §03.02 parse_conf
@@ -235,6 +379,10 @@ parse_conf() {
             cwd)          RUN_CWD="$value" ;;
             env_host)     RUN_ENV_HOST="$value" ;;
             tty)          RUN_TTY="$value" ;;
+            build)        RUN_BUILD="$value" ;;
+            rebuild)      RUN_REBUILD="$value" ;;
+            force_rebuild) RUN_FORCE_REBUILD="$value" ;;
+            store)        RUN_STORE="$value" ;;
         esac
     done < "$conf_file"
 }
@@ -274,6 +422,17 @@ parse_args() {
             --mirror-ro)   RUN_MIRRORS_RO="$RUN_MIRRORS_RO $(readlink -f "$2")"; shift 2 ;;
             -v|--verbose)  RUN_VERBOSITY=$(( RUN_VERBOSITY + 1 )); shift ;;
             -q|--quiet)    RUN_VERBOSITY=0; shift ;;
+            --build)       RUN_BUILD=1; shift ;;
+            --no-build)    RUN_BUILD=0; shift ;;
+            --rebuild)     RUN_REBUILD=1; shift ;;
+            --no-rebuild)  RUN_REBUILD=0; shift ;;
+            --force-rebuild) RUN_FORCE_REBUILD=1; shift ;;
+            --clean)       RUN_CLEAN=1; shift ;;
+            --store)       RUN_STORE="$2"; shift 2 ;;
+            --init)        RUN_INIT_CONTAINER=1; RUN_INIT_FLAKE=1; RUN_INIT_CONFIG=1; shift ;;
+            --init-container) RUN_INIT_CONTAINER=1; shift ;;
+            --init-flake)  RUN_INIT_FLAKE=1; shift ;;
+            --init-config) RUN_INIT_CONFIG=1; shift ;;
             --help|-h)     help; exit 0 ;;
             -*)            log_error "unknown option: $1"; exit 125 ;;
             *)             RUN_USER_CMD="$*"; break ;;
@@ -433,6 +592,125 @@ build_mirror_mounts() {
 }
 
 # ─────────────────────────────────────────────────────────────
+# §07 IMAGE MANAGEMENT
+# ─────────────────────────────────────────────────────────────
+# §07.01  image_fingerprint()  — SHA256 of Dockerfile for staleness check
+# §07.02  manage_image()       — clean / auto-build / auto-rebuild
+# §07.03  mount_nix_store()    — add /nix special-purpose mount (shared or local)
+
+# §07.01 image_fingerprint
+# Prints SHA256 hash of Dockerfile at run root (used for staleness label).
+image_fingerprint() {
+    local df="$RUN_RUN_ROOT/Dockerfile"
+    [ -f "$df" ] || { printf ''; return; }
+    sha256sum "$df" | cut -d' ' -f1
+}
+
+# §07.02 manage_image
+# Handles --clean, auto-build (image absent), auto-rebuild (image stale).
+# Runs after detect_runtime; before stem resolution and invoke_container.
+manage_image() {
+    local image="${RUN_IMAGE:-}"
+    [ -z "$image" ] && return 0
+
+    # --clean: rmi and exit
+    if [ "${RUN_CLEAN:-0}" = "1" ]; then
+        if "$RUN_RUNTIME" image inspect "$image" >/dev/null 2>&1; then
+            "$RUN_RUNTIME" rmi "$image"
+        else
+            log_warn "image $image not found, nothing to remove"
+        fi
+        exit 0
+    fi
+
+    # Dry-run: report what would happen, don't touch anything (ADR-0009)
+    if [ "${RUN_DRY_RUN:-0}" = "1" ]; then
+        return 0
+    fi
+
+    local image_present=0
+    "$RUN_RUNTIME" image inspect "$image" >/dev/null 2>&1 && image_present=1
+
+    # Auto-build: image absent
+    if [ "$image_present" = "0" ]; then
+        if [ "${RUN_BUILD:-1}" = "0" ]; then
+            log_error "image $image not found and --no-build is set"
+            exit 125
+        fi
+        _build_image
+        return
+    fi
+
+    # Auto-rebuild: image stale (force-rebuild bypasses fingerprint check)
+    if [ "${RUN_FORCE_REBUILD:-0}" = "1" ]; then
+        _build_image
+        return
+    fi
+
+    if [ "${RUN_REBUILD:-1}" = "1" ]; then
+        local current_fp stored_fp
+        current_fp="$(image_fingerprint)"
+        stored_fp="$("$RUN_RUNTIME" image inspect \
+            --format '{{index .Labels "run.fingerprint"}}' "$image" 2>/dev/null)"
+        if [ -n "$current_fp" ] && [ "$current_fp" != "$stored_fp" ]; then
+            log_info "image $image is stale (Dockerfile changed), rebuilding"
+            _build_image
+        fi
+    fi
+}
+
+# Build image, tagging with current Dockerfile fingerprint.
+_build_image() {
+    local fp
+    fp="$(image_fingerprint)"
+    log_info "building image $RUN_IMAGE"
+    if [ "${RUN_VERBOSITY:-1}" -ge 2 ]; then
+        "$RUN_RUNTIME" build \
+            --label "run.fingerprint=${fp}" \
+            -t "$RUN_IMAGE" "$RUN_RUN_ROOT"
+    else
+        "$RUN_RUNTIME" build \
+            --label "run.fingerprint=${fp}" \
+            -t "$RUN_IMAGE" "$RUN_RUN_ROOT" >/dev/null 2>&1
+    fi
+}
+
+# §07.03 mount_nix_store
+# Adds /nix special-purpose mount to RUN_MOUNT_PAIRS.
+# shared mode: $XDG_CACHE_HOME/run/nix (default ~/.cache/run/nix)
+# local mode:  <run-root>/fs/default/nix
+# On first use (store empty), seeds the store from the image so packages
+# already installed in the image remain available after the mount.
+# Seeding is skipped in dry-run (ADR-0009: dry-run never changes state).
+mount_nix_store() {
+    local store_root
+    case "${RUN_STORE:-shared}" in
+        local)
+            store_root="${RUN_RUN_ROOT}/fs/default/nix"
+            ;;
+        *)
+            local cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
+            store_root="${cache_home}/run/nix"
+            ;;
+    esac
+    mkdir -p "$store_root"
+    if [ -z "$(ls -A "$store_root" 2>/dev/null)" ]; then
+        if [ -n "${RUN_IMAGE:-}" ] && [ "${RUN_DRY_RUN:-0}" != "1" ]; then
+            if "$RUN_RUNTIME" image inspect "$RUN_IMAGE" >/dev/null 2>&1; then
+                log_info "seeding nix store from $RUN_IMAGE (first use)"
+                "$RUN_RUNTIME" run --rm \
+                    --volume "${store_root}:/nix-host" \
+                    "$RUN_IMAGE" \
+                    sh -c 'cp -a /nix/. /nix-host/'
+            fi
+        fi
+    fi
+    [ "$(ls -A "$store_root" 2>/dev/null)" ] || return 0
+    RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${store_root}:/nix
+"
+}
+
+# ─────────────────────────────────────────────────────────────
 # §08 RUNTIME DETECTION & UID MAPPING
 # ─────────────────────────────────────────────────────────────
 # §08.01  detect_runtime()  — podman → docker auto-detect
@@ -480,8 +758,13 @@ dry_run_print() {
         [ -z "$pair" ] && continue
         printf '%s [INFO ] run: dry-run env %s\n' "$ts" "$pair" >&2
     done
-    printf '%s [INFO ] run: dry-run image=%s command: %s\n' \
-        "$ts" "${RUN_IMAGE:-<unset>}" "$RUN_USER_CMD" >&2
+    if [ "${RUN_DEVSHELL:-0}" = "1" ]; then
+        printf '%s [INFO ] run: dry-run nix develop path:%s --command %s\n' \
+            "$ts" "$RUN_RUN_ROOT" "$RUN_USER_CMD" >&2
+    else
+        printf '%s [INFO ] run: dry-run image=%s command: %s\n' \
+            "$ts" "${RUN_IMAGE:-<unset>}" "$RUN_USER_CMD" >&2
+    fi
 }
 
 # §09.02 invoke_container
@@ -489,8 +772,6 @@ dry_run_print() {
 # to iterate over mount/env pairs while staying in the current shell so that
 # set -- accumulates args without subshell isolation.
 invoke_container() {
-    detect_runtime || exit 125
-
     # Start building positional params for: $runtime run <args> $image -c '"$@"' -- $cmd
     set --
 
@@ -527,12 +808,19 @@ _MOUNTS_
 $RUN_ENV_PAIRS
 _ENVS_
 
-    # Workdir and entrypoint
+    # Workdir
     [ -n "${RUN_WORKDIR:-}" ] && set -- "$@" --workdir "$RUN_WORKDIR"
-    set -- "$@" --entrypoint bash
 
     # Execute and propagate exit code
-    "$RUN_RUNTIME" run "$@" "$RUN_IMAGE" -c '"$@"' -- $RUN_USER_CMD
+    if [ "${RUN_DEVSHELL:-0}" = "1" ]; then
+        # devShell mode: nix develop resolves all packages then forwards the command
+        "$RUN_RUNTIME" run "$@" "$RUN_IMAGE" \
+            nix develop "path:$RUN_RUN_ROOT" --command $RUN_USER_CMD
+    else
+        # Direct mode: bash entrypoint with POSIX-safe arg forwarding
+        set -- "$@" --entrypoint bash
+        "$RUN_RUNTIME" run "$@" "$RUN_IMAGE" -c '"$@"' -- $RUN_USER_CMD
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -556,6 +844,13 @@ main() {
     defaults
     parse_args "$@"
 
+    # Init mode: write stub files and exit immediately (no run root needed).
+    if [ "${RUN_INIT_CONTAINER:-0}" = "1" ] || \
+       [ "${RUN_INIT_FLAKE:-0}"     = "1" ] || \
+       [ "${RUN_INIT_CONFIG:-0}"    = "1" ]; then
+        do_init
+    fi
+
     find_run_root || exit 125
 
     parse_conf "$RUN_RUN_ROOT/run.conf"
@@ -575,8 +870,15 @@ main() {
         parse_env_file "$RUN_RUN_ROOT/${RUN_STEM}.env"
     fi
     load_explicit_stems
+    detect_runtime || exit 125
+    manage_image
+    mount_nix_store
+
     build_cwd_mounts
     build_mirror_mounts
+
+    RUN_DEVSHELL=0
+    [ -f "${RUN_RUN_ROOT}/flake.nix" ] && RUN_DEVSHELL=1
 
     if [ "${RUN_DRY_RUN:-0}" = "1" ]; then
         dry_run_print
