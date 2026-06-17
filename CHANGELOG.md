@@ -6,6 +6,8 @@ Versions are date codes: `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [2026-06-17]
+
 ### Added
 - `--init` / `--init-container` / `--init-flake` / `--init-config` flags to
   bootstrap a new project (writes `Dockerfile`, `flake.nix`, `run.conf`,
@@ -28,6 +30,9 @@ Versions are date codes: `YYYY-MM-DD`.
   immutability, no-args safety, nix-store-on-host, XDG shared store
 - `--search <term>`: runs `nix search nixpkgs <term>` inside the container
   to discover package attribute paths; exits after printing results
+- `--add <pkg>`: validates package via `nix eval`, inserts above `# run:packages`
+  sentinel in `flake.nix`; idempotent; prints pre-warm hint; repeatable
+- `--remove <pkg>`: deletes package line from `flake.nix`; idempotent
 - `docs/adr/0013`: sentinel comment as insertion anchor for `--add`/`--remove`
 
 ## [2026-06-15]
@@ -59,5 +64,6 @@ Versions are date codes: `YYYY-MM-DD`.
 - `docs/adr/` — 7 ADRs: function layout, stem atomicity, reversible flags,
   UID mapping, three-surface settings, log format, script navigation
 
-[Unreleased]: https://github.com/example/run/compare/2026-06-15...HEAD
+[Unreleased]: https://github.com/example/run/compare/2026-06-17...HEAD
+[2026-06-17]: https://github.com/example/run/compare/2026-06-15...2026-06-17
 [2026-06-15]: https://github.com/example/run/releases/tag/2026-06-15
