@@ -39,3 +39,10 @@ teardown() { teardown_fixture; }
     [ "$status" -eq 0 ]
     [[ "$stderr" == *"timeout=30s"* ]]
 }
+
+@test "timeout: --timeout 0 at CLI disables timeout from run.conf" {
+    write_run_conf "image = test:latest" "timeout = 30"
+    run --separate-stderr "$RUN_SH" --timeout 0 --dry-run echo hi
+    [ "$status" -eq 0 ]
+    [[ "$stderr" != *"timeout="* ]]
+}

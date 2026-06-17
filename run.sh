@@ -419,7 +419,7 @@ parse_conf() {
             rebuild)      RUN_REBUILD="$value" ;;
             force_rebuild) RUN_FORCE_REBUILD="$value" ;;
             store)        RUN_STORE="$value" ;;
-            timeout)      RUN_TIMEOUT="$value" ;;
+            timeout)      [ -z "${_CLI_TIMEOUT_SET:-}" ] && RUN_TIMEOUT="$value" ;;
         esac
     done < "$conf_file"
 }
@@ -470,7 +470,7 @@ parse_args() {
             --init-container) RUN_INIT_CONTAINER=1; shift ;;
             --init-flake)  RUN_INIT_FLAKE=1; shift ;;
             --init-config) RUN_INIT_CONFIG=1; shift ;;
-            --timeout)     RUN_TIMEOUT="$2"; shift 2 ;;
+            --timeout)     RUN_TIMEOUT="$2"; _CLI_TIMEOUT_SET=1; shift 2 ;;
             --search)      RUN_PKG_SEARCH="$2"; shift 2 ;;
             --add)         RUN_PKG_ADD="$RUN_PKG_ADD $2"; shift 2 ;;
             --remove)      RUN_PKG_REMOVE="$RUN_PKG_REMOVE $2"; shift 2 ;;
