@@ -83,6 +83,12 @@ FLAKE
     ! grep -qE "^[[:space:]]+bash[[:space:]]*$" "$FIXTURE_DIR/flake.nix"
 }
 
+@test "remove: --remove is a no-op when package not in flake.nix" {
+    write_flake
+    run "$RUN_SH" --remove not-there
+    [ "$status" -eq 0 ]
+}
+
 @test "add: --add exits 125 when sentinel comment is missing" {
     cat > "$FIXTURE_DIR/flake.nix" <<'FLAKE'
 { outputs = { self, nixpkgs }: {
