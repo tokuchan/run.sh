@@ -6,6 +6,8 @@ Versions are date codes: `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [2026-06-24]
+
 ### Added
 - Auto-paging for `--help`: pipes through `$PAGER` → `less -FRX` → `more` → `cat`
   only when stdout is a TTY
@@ -15,6 +17,8 @@ Versions are date codes: `YYYY-MM-DD`.
 - `--timeout <seconds>` / `RUN_TIMEOUT` / `timeout` in `run.conf`: kills the
   container and exits 124 when the run-time limit is exceeded; `0` means no
   limit (default); implies `--no-tty`
+- `README.md`, `CONTRIBUTING.md`: project overview, quick start, git submodule
+  usage, contribution guide
 
 ## [2026-06-17]
 
@@ -74,6 +78,7 @@ Versions are date codes: `YYYY-MM-DD`.
 - `docs/adr/` — 7 ADRs: function layout, stem atomicity, reversible flags,
   UID mapping, three-surface settings, log format, script navigation
 
-[Unreleased]: https://github.com/example/run/compare/2026-06-17...HEAD
-[2026-06-17]: https://github.com/example/run/compare/2026-06-15...2026-06-17
-[2026-06-15]: https://github.com/example/run/releases/tag/2026-06-15
+[Unreleased]: https://github.com/tokuchan/run.sh/compare/2026-06-24...HEAD
+[2026-06-24]: https://github.com/tokuchan/run.sh/compare/2026-06-17...2026-06-24
+[2026-06-17]: https://github.com/tokuchan/run.sh/compare/2026-06-15...2026-06-17
+[2026-06-15]: https://github.com/tokuchan/run.sh/releases/tag/2026-06-15
