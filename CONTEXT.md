@@ -2,38 +2,41 @@
 
 ## Terms
 
-### Stem
-The name used to match a mount-set and env-set to a subcommand. Resolved via symlink dispatch first: if `basename $0` is not `run.sh`, the stem is `basename $0`. Otherwise the stem is the first positional argument after `run.sh`'s own options. Used to locate `<stem>.run`, `fs/<stem>/`, and `<stem>.env`.
+### Runner
+The `run.sh` script renamed to match the project (e.g. `foo`). Its `basename` is the project identity. Invoked directly or via symlink — either works because `basename $0` yields the project name in both cases. The runner owns command dispatch, container lifecycle, and all run.sh flags. If `basename $0` does not match the expected project name (the `name` key in `commands/run.conf`, or `basename` of the run root if `name` is absent), a `[WARN]` is emitted suggesting the script be renamed. This suppresses false warnings for projects whose runner name intentionally matches their directory or `run.conf` name (including the `run.sh` project itself).
 
-### Mount-set
-A pairing of a filesystem directory (`fs/<stem>/`) and a mount-config file (`<stem>.run`) that together define the bind mounts for one invocation context. The `default` mount-set is always auto-loaded first. Additional mount-sets are composed via `@include <name>` directives inside `.run` files.
+### Command
+A directory in the command tree that represents one invocable operation. A command directory may contain: `main.<ext>` (the program to run), `run` or `run.txt` (mount configuration), `env` or `env.txt` (environment variables), `help.md` or `help.txt` (user-facing documentation), and `fs/` (host-side mount sources). The command is the atomic unit of configuration — replaces Stem.
 
-### Env-set
-A `.env` file (`<stem>.env`) whose contents are injected as environment variables into the container for one invocation context. Always paired with its mount-set — a stem is the atomic unit of configuration. `@include <name>` in a `.run` file loads both `<name>.run` and `<name>.env` together.
+### Command tree
+The `commands/` directory at the run root. Contains the full set of available commands for a project, arranged as a directory hierarchy where each subdirectory is a command or sub-command.
+
+### Command path
+The resolved sequence of directory names that identifies a specific command (e.g. `release build` → `commands/release/build/`). Determined by greedy longest match against the command tree: run.sh walks the argument list token by token into `commands/`, stopping at the first token that starts with `-` or has no matching child directory.
+
+### Command dispatch
+The process by which run.sh resolves the command path from the argument list, loads configuration from each directory level along the path, then invokes `main.<ext>` with the remaining arguments. Configuration (mounts, env vars) is accumulated from the command tree root down to the matched command directory — each level inherits from its parent, with the deepest (most specific) directory winning on conflicts.
 
 ### CWD mirror
-The host's current working directory, bind-mounted at the same absolute path inside the container, with `--workdir` set to match. Always active unless `--no-cwd` is passed. If the CWD path conflicts with a mount defined in a `.run` file, the CWD mirror takes precedence and a warning is emitted to the log.
+The host's current working directory, bind-mounted at the same absolute path inside the container, with `--workdir` set to match. Always active unless `--no-cwd` is passed. If the CWD path conflicts with a mount defined in a command's `run` file, the CWD mirror takes precedence and a warning is emitted to the log.
 
 ### Project root mirror
-The root of the VCS repository containing the CWD, bind-mounted at the same absolute path inside the container. Always active alongside the CWD mirror (both are on by default, both disabled by `--no-cwd`). Conflict resolution is the same as for CWD mirror: project root mirror wins over `.run` mounts, with a warning.
+The root of the VCS repository containing the CWD, bind-mounted at the same absolute path inside the container. Always active alongside the CWD mirror (both are on by default, both disabled by `--no-cwd`). Conflict resolution is the same as for CWD mirror: project root mirror wins over command mounts, with a warning.
 
 ### Container runtime
 Podman or Docker. Auto-detected at startup (try `podman`, fall back to `docker`). Overridable via `run.conf`, `RUN_RUNTIME` env var, or `--runtime` flag. The goal is output indistinguishable from locally-installed tools, so UID/GID mapping is applied: podman uses `--userns=keep-id`; docker uses `--user $(id -u):$(id -g)`.
 
 ### Project root detection
-Resolved in order: `jj root` → `git rev-parse --show-toplevel` → walk up from CWD until `run.conf` is found. The directory containing `run.conf` is the **run root** — all stem files (`*.run`, `*.env`, `fs/`) are resolved relative to it. Overridable with `--project-root <path>` / `RUN_PROJECT_ROOT`. Error if no run root can be determined.
+Resolved in order: `jj root` → `git rev-parse --show-toplevel` → walk up from CWD until `commands/run.conf` is found. The directory containing `commands/` is the **run root**. Overridable with `--project-root <path>` / `RUN_PROJECT_ROOT`. Error if no run root can be determined.
 
 ### Run root
-The directory containing `run.conf`. This is where stem files and `fs/` directories live. When inside a VCS repo, the run root is the VCS project root. Outside a VCS repo, the run root is discovered by walking up from CWD.
+The directory containing the `commands/` subtree. Identified by the presence of `commands/run.conf`. When inside a VCS repo, the run root is the VCS project root. Outside a VCS repo, the run root is discovered by walking up from CWD. `Dockerfile` and `flake.nix` also live here.
 
 ### Path mirror
 An arbitrary host path, canonicalized via `readlink -f` (or POSIX equivalent) to its absolute form, then bind-mounted at that same absolute path inside the container. Specified with `--mirror <path>` (read-write) or `--mirror-ro <path>` (read-only). Repeatable. `~` in the path is expanded before canonicalization.
 
-### Default stem
-The reserved stem `default`. Its mount-set (`default.run` / `fs/default/`) and env-set (`default.env`) are always loaded first, before the resolved stem and any `@include` directives. Provides project-wide defaults.
-
 ### Project config
-`run.conf` at the project root. Holds project-wide defaults for any configurable setting. Format: `snake_case = value` per line, `#` comments, blank lines ignored. Parsed not sourced. Unknown keys are a hard error. All settings here are overridable by environment variable and by CLI option.
+`commands/run.conf` at the command tree root. Holds project-wide defaults for the runner's own settings (`image`, `runtime`, `store`, `timeout`, `name`, etc.). Its presence is what marks the run root. The `name` key sets the expected runner name — used to suppress the rename warning when the directory name and runner name intentionally differ. Format: `snake_case = value` per line, `#` comments, blank lines ignored. Parsed not sourced. Unknown keys are a hard error. All settings here are overridable by environment variable and by CLI option. Does not hold mount or env configuration — those live in `commands/run` and `commands/env`.
 
 ### Three-surface setting
 Every configurable setting has exactly three surfaces: a CLI option (`--kebab-case` / `--no-kebab-case`), an environment variable (`RUN_SCREAMING_SNAKE`), and a `run.conf` key (`snake_case`). Precedence: CLI > env var > `run.conf` > built-in default.
@@ -41,20 +44,17 @@ Every configurable setting has exactly three surfaces: a CLI option (`--kebab-ca
 ### Config hierarchy
 Command-line option > environment variable > `run.conf` > built-in default. Applies to every configurable setting.
 
-### Optional stem file
-Both `<stem>.run` and `<stem>.env` are optional. Absence is silently ignored. A stem with neither file is valid — it inherits from `default` and any `@include` chain. The only hard error for stem file absence is an `@include` directive referencing a name with no files at all (treated as a typo).
-
-### Explicit stem
-An additional stem loaded via `--stem <name>` / `-s <name>` (repeatable). Loaded after `default` and the auto-resolved stem, in left-to-right order. Later stems win on env var conflicts. Can also be listed in `run.conf` as a baseline set. `@include` directives within `.run` files are resolved before explicit stems, so `-s` stems always take final precedence.
-
-### Load order
-The sequence in which stems are applied: `default` → auto-resolved stem (with its `@include` tree) → `run.conf`-listed stems → `--stem` CLI stems (left-to-right). Mount sets accumulate; env var conflicts are resolved last-wins.
+### Command load order
+The sequence in which command configuration is applied: command tree root (`commands/run`, `commands/env`) → each directory level along the command path in order → deepest matched command directory last. Mount specs accumulate across all levels; env var conflicts and mount destination conflicts are resolved last-wins (deepest directory wins).
 
 ### Option parsing
-`run.sh` greedily consumes its own recognized options from the front of the argument list, stopping at the first unrecognized token (which becomes the start of the user command). `--` forces an explicit split: everything after `--` is the user command regardless of content. This allows passing flags that collide with `run.sh`'s own options (e.g. `run -- -v g++` sends `-v` to `g++`, not to `run.sh`).
+The runner greedily consumes its own recognized options from the front of the argument list. The first non-option, non-`--` token begins command dispatch. `--` forces an explicit switch to command dispatch: everything after `--` is treated as the command path and its arguments. This allows run.sh options and command path tokens to coexist unambiguously (e.g. `foo --verbose -- release build` sets verbosity then dispatches to `commands/release/build/`).
 
 ### Command forwarding
-The user command is forwarded to the container via `--entrypoint bash … -c '"$@"' -- "$@"`. This passes each argument as a discrete word — no quoting reconstruction needed. Word boundaries established by the host shell are preserved exactly inside the container. Everything after `run.sh`'s own `--` separator is treated as the user command.
+After command dispatch resolves `main.<ext>`, run.sh invokes it inside the container with the remaining arguments forwarded verbatim via `--entrypoint bash … -c '"$@"' -- main.<ext> "$@"`. Word boundaries established by the host shell are preserved exactly. The runner's own name and the command path tokens are consumed by dispatch and never forwarded.
+
+### Runner metadata
+Three environment variables injected by the runner into every container invocation, regardless of what `commands/env` files specify. Read-only — cannot be overridden by command configuration. `RUN_PROJECT`: the runner's `basename $0` (e.g. `foo`). `RUN_COMMAND`: the slash-separated resolved command path (e.g. `release/build`). `RUN_ROOT`: the absolute host path of the run root, available inside the container via the project root mirror. Scripts use these to construct paths to sibling files without hardcoding.
 
 ### TTY auto-detection
 `run.sh` passes `-t` to the container runtime only when its own stdin is a terminal (`[ -t 0 ]`). Stdin (`-i`) is always connected. Overridable with `--tty` / `--no-tty`.
@@ -93,18 +93,18 @@ An explicit `--force-rebuild` / `RUN_FORCE_REBUILD=1` flag that triggers a full 
 `--clean` removes the container image from the local runtime (`<runtime> rmi <image>`) and exits immediately without running a command or rebuilding. Used to free disk space or force a fully fresh build on the next invocation.
 
 ### Init
-A starter file written by `run.sh` to bootstrap a new project. Three init flags exist: `--init-container` writes `Dockerfile`, `--init-flake` writes `flake.nix`, `--init-config` writes `run.conf`. `--init` is shorthand for all three. Init files are always written to CWD — run.sh does not attempt run root detection in init mode. Writing `run.conf` to CWD marks CWD as the run root for all future invocations from that directory. If the target file already exists, `run.sh` emits a warning and skips that file — it never clobbers existing content. If VCS root detection would have resolved a different directory than CWD, an informational log message notes the discrepancy. Init flags cause immediate exit after writing; they cannot be combined with a command invocation.
+Starter files written by the runner to bootstrap a new project. Four init flags exist: `--init-container` writes `Dockerfile`, `--init-flake` writes `flake.nix`, `--init-config` writes `run.conf`, `--init-commands` scaffolds a `commands/` directory with a root `help.md` and a sample `hello/main.sh`. `--init` is shorthand for all four. Init files are always written to CWD — run.sh does not attempt run root detection in init mode. Writing `run.conf` to CWD marks CWD as the run root for all future invocations from that directory. If the target file already exists, run.sh emits a warning and skips that file — it never clobbers existing content. If VCS root detection would have resolved a different directory than CWD, an informational log message notes the discrepancy. Init flags cause immediate exit after writing; they cannot be combined with a command invocation.
 
-`.gitignore` is handled specially: `--init` (or `--init-container`) performs a smart append — adding `fs/default/nix/` and `result` only if those entries are not already present. `.gitignore` is never skipped or clobbered wholesale; it is created if absent or appended to if present.
+`.gitignore` is handled in two places. `--init-commands` writes `commands/.gitignore` containing `**/fs/` — a single entry that covers `fs/` directories at any depth within the command tree, including the local nix store, automatically for all future commands. `--init` (or `--init-container`) smart-appends `result` to the root `.gitignore` only. Neither file is ever clobbered; root `.gitignore` is created if absent or appended to if present; `commands/.gitignore` is written fresh only if absent.
 
 ### Toolchain specifier
 `flake.nix` is the sole authoritative source of what packages are available inside the container. The `Dockerfile` is sealed infrastructure (installs Nix and enables flakes only — no packages) and must not be edited to add packages. Users add tools by editing `flake.nix` directly, or via `--add` / `--remove` / `--search` (see Package management). Packages are installed at runtime into a host-side nix store that is mounted into the container, not baked into the image at build time. This separation is enforced by convention and documented in ADR-0008.
 
 ### Nix store — local mode
-The nix store lives inside the project's `fs/default/nix/` directory, mounted at `/nix` inside the container. Each project has an isolated store. Used for hermetic projects. `fs/default/nix/` must be gitignored. Selected by `store = local` in `run.conf` (or `RUN_STORE=local` / `--store local`).
+The nix store lives inside the project's `commands/fs/nix/` directory, mounted at `/nix` inside the container. Each project has an isolated store. Used for hermetic projects. `commands/fs/nix/` must be gitignored. Selected by `store = local` in `commands/run.conf` (or `RUN_STORE=local` / `--store local`).
 
 ### Nix store mount
-A special-purpose mount constructed in §07 alongside the image management phase, using the same mechanism as CWD mirror and project root mirror (appended directly to `RUN_MOUNT_PAIRS`). The host path is resolved from the `store` config key — shared mode uses `$XDG_CACHE_HOME/run/nix/`; local mode uses `<run-root>/fs/default/nix/`. The directory is created if absent. Always mounted at `/nix` inside the container.
+A special-purpose mount constructed in §07 alongside the image management phase, using the same mechanism as CWD mirror and project root mirror (appended directly to `RUN_MOUNT_PAIRS`). The host path is resolved from the `store` config key — shared mode uses `$XDG_CACHE_HOME/run/nix/`; local mode uses `<run-root>/commands/fs/nix/`. The directory is created if absent. Always mounted at `/nix` inside the container.
 
 ### Nix store — shared mode
 The nix store lives in an XDG-compliant cache directory on the host (e.g. `$XDG_CACHE_HOME/run/nix/`, defaulting to `~/.cache/run/nix/`) and is shared across all projects. Safe to share because the Nix store is content-addressed — different package versions have different hashes and coexist without conflict. This is the preferred default for most projects. Eliminates gigabytes of per-project duplicates. Documented in ADR-0012.
@@ -122,7 +122,13 @@ The comment `# run:packages` placed inside the `packages = with pkgs; [ ... ]` l
 `--search <term>` runs `nix search nixpkgs <term>` inside the container and prints the results to stdout. Used for discovery when the exact nix attribute path is unknown. Exits 0 after printing. Output is the raw nix search output — package names, versions, descriptions. Combine with `--add` in a separate invocation once the exact attribute path is identified.
 
 ### Package pre-warm
-Running `run true` after `--add` to trigger `nix develop` and download newly-added packages into the nix store before the first real command invocation. Not automatic — `--add` prints an info-level suggestion to do this. The next real command invocation would trigger the download anyway; pre-warming just moves the latency to a moment the user expects it.
+Running any command (e.g. `foo --help`) after `--add` to trigger `nix develop` and download newly-added packages into the nix store before the first real command invocation. Not automatic — `--add` prints an info-level suggestion to do this. The next real command invocation would trigger the download anyway; pre-warming just moves the latency to a moment the user expects it.
+
+### Command help
+Per-command documentation stored as `help.md` or `help.txt` in the command directory. The first paragraph is the short description — used in auto-generated listings. `--help` after any command path prefix displays the help file for the deepest matched command directory (run.sh intercepts `--help` and never forwards it to `main.<ext>`). `--help` with no command path shows top-level runner help followed by the shallow command listing.
+
+### Command listing
+The auto-generated output shown when the runner is invoked with a command path that has no `main.<ext>` (including the top-level no-subcommand case). If a `help.md` or `help.txt` exists in the matched directory, its first paragraph is displayed before the listing. Displays only the immediate children of that directory (non-recursive), with the first sentence of each child's `help.md`/`help.txt` as a trailing description. `--help` produces a full recursive listing from the matched directory. `--list-commands` produces a machine-readable list of all commands in the entire tree: one per line, slash-separated path, tab-separated from its usage line (first sentence of `help.md`/`help.txt`); description omitted if no help file exists.
 
 ### Help pager
 When `--help` is invoked and stdout is a terminal, run.sh pipes the full manual through a pager. Detection chain: `$PAGER` → `less` → `more` → `cat`. When `less` is selected directly (i.e. `$PAGER` is not set), it is invoked as `less -FRX` so that: content fitting on one screen exits immediately (`-F`), SGR codes render correctly (`-R`), and the screen is not cleared on exit (`-X`). When `$PAGER` is set, it is invoked verbatim.

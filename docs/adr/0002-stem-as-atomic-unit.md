@@ -1,7 +1,7 @@
 # ADR 0002: Stem is the atomic unit of configuration
 
 ## Status
-Accepted
+Superseded by ADR-0016
 
 ## Context
 `run.sh` needs to associate bind mounts, environment variables, and (via `@include`) transitive dependencies with a given invocation context. These could be configured independently (separate include mechanisms per file type), or treated as a single logical unit.
