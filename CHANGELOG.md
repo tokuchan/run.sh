@@ -7,6 +7,25 @@ Versions are date codes: `YYYY-MM-DD`.
 ## [Unreleased]
 
 ### Added
+- `commands/` tree scaffold for the run.sh project itself: `commands/run.conf`,
+  `commands/test/main.sh` — `./run.sh test` now runs the full bats suite
+  inside the toolchain container, replacing `make test` / `make gate`.
+- `.claude/CLAUDE.md` documents the gate command (`./run.sh test`) for the
+  `/commit` skill.
+
+### Removed
+- `Makefile` — eliminated; `./run.sh test` replaces all targets.
+- Root-level `run.conf` — config migrated to `commands/run.conf`.
+
+### Changed
+- `README.md`: removed `gmake` dependency; rewrote Quick Start and What It
+  Does sections to describe command dispatch; replaced stem-system docs with
+  command directory layout; updated examples to `myproject`-style.
+- `CONTRIBUTING.md`: removed `make gate` references; updated dev setup to
+  `./run.sh test`; requirements now list only `sh`, `git`/`jj`, and a
+  container runtime.
+
+### Added (dispatch, carried forward)
 - Command directory dispatch: `commands/` tree replaces the stem system. Each
   command is a directory containing `main[.ext]`, `env`, `run`, and `help.md`.
   Greedy longest-match walk selects the deepest matching directory before a flag

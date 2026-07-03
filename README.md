@@ -3,21 +3,28 @@
 A single-file POSIX sh tool manager for projects. Wraps a container runtime
 (podman or docker) to run containerized commands with your project's mounts,
 environment, and packages — requiring nothing beyond `sh`, `git` (or `jj`),
-`docker` or `podman`, and `gmake`.
+and `docker` or `podman`.
 
 ## Quick Start
 
 ```sh
 # Bootstrap a new project
-run --init            # write Dockerfile, flake.nix, and run.conf
-$EDITOR flake.nix     # add packages to devShells.default
-run make all          # image built automatically on first run
+cp run.sh myproject          # rename to match your project
+chmod +x myproject
+./myproject --init           # write Dockerfile, flake.nix, commands/run.conf
+$EDITOR flake.nix            # add packages to devShells.default
+$EDITOR commands/run.conf    # set image = myregistry/myimage:latest
+
+# Add a command
+mkdir -p commands/build
+printf '#!/bin/sh\nexec make "$@"\n' > commands/build/main.sh
+chmod +x commands/build/main.sh
 
 # Daily use
-run g++ -o hello hello.cpp
-run make test
-run --dry-run make all     # preview the full container invocation
-run --timeout 60 make ci   # kill and exit 124 if it hangs
+./myproject build            # image built automatically on first run
+./myproject release package --arch=arm64
+./myproject --dry-run build  # preview the full container invocation
+./myproject                  # list available commands
 ```
 
 ## Requirements
@@ -27,7 +34,6 @@ run --timeout 60 make ci   # kill and exit 124 if it hangs
 | POSIX sh          | Any POSIX shell: bash, dash, ash, busybox sh     |
 | git or jj         | Project root detection                           |
 | docker or podman  | Container runtime (auto-detected, prefer podman) |
-| gmake             | For the included Makefile; not needed by run.sh  |
 
 No compiled binaries. No package managers at install time. No curl-to-bash.
 
@@ -73,16 +79,25 @@ git commit -m "chore: update run.sh"
 
 ## What It Does
 
-`run.sh` wraps podman or docker to make containerized tools feel native:
+`run.sh` wraps podman or docker to make containerized commands feel native:
+
+- **Command dispatch** — commands live in a `commands/` directory tree at
+  the project root. Each subdirectory is a command; `commands/build/main.sh`
+  runs when you invoke `./myproject build`. Sub-commands nest naturally:
+  `./myproject release package` dispatches to `commands/release/package/`.
+
+- **Greedy longest match** — the dispatcher walks directory tokens from the
+  argument list until a flag or missing directory stops it. Remaining
+  arguments are forwarded verbatim to `main.<ext>`.
 
 - **Path transparency** — CWD and project root are bind-mounted at identical
   absolute paths inside the container. Compiler output, debugger paths, and
   file references are the same on host and inside the container.
 
-- **Stem-based configuration** — mount sets (`.run` files) and environment
-  files (`.env` files) are selected by stem (the first positional argument,
-  or the symlink name when invoked via symlink). Multiple stems compose via
-  `@include`.
+- **Per-command configuration** — each command directory may have an `env`
+  file (KEY=VALUE pairs) and a `run` file (bind-mount specs). Configuration
+  accumulates root→leaf; child values override parent values for the same
+  key. `RUN_PROJECT`, `RUN_COMMAND`, and `RUN_ROOT` are always injected.
 
 - **Auto-build / auto-rebuild** — builds the container image when absent;
   detects `Dockerfile` changes via fingerprint label and rebuilds
@@ -93,15 +108,17 @@ git commit -m "chore: update run.sh"
   `$XDG_CACHE_HOME/run/nix/` so images stay thin and package updates don't
   require rebuilding.
 
-- **Bootstrap** — `run --init` writes stub `Dockerfile`, `flake.nix`, and
-  `run.conf` without clobbering existing files.
+- **Bootstrap** — `./myproject --init` writes stub `Dockerfile`, `flake.nix`,
+  `commands/run.conf`, and a `commands/` skeleton without clobbering
+  existing files.
 
-- **Timeout** — `--timeout <secs>` (or `timeout = N` in `run.conf`) kills
-  the container after N seconds and exits 124, matching GNU `timeout`
+- **Timeout** — `--timeout <secs>` (or `timeout = N` in `commands/run.conf`)
+  kills the container after N seconds and exits 124, matching GNU `timeout`
   behavior.
 
-- **Formatted help** — `run --help` is paged through `$PAGER` (falling back
-  to `less -FRX` or `more`) with bold/color section headers on TTY output.
+- **Formatted help** — `./myproject --help` is paged through `$PAGER`
+  (falling back to `less -FRX` or `more`) with bold/color section headers
+  on TTY output. Per-command help comes from `commands/<cmd>/help.md`.
 
 ## Configuration
 
@@ -109,37 +126,28 @@ Three surfaces, in precedence order (highest first):
 
 1. **CLI flags** — `--runtime`, `--image`, `--timeout`, `--no-tty`, etc.
 2. **Environment variables** — `RUN_RUNTIME`, `RUN_IMAGE`, `RUN_TIMEOUT`, etc.
-3. **`run.conf`** — `runtime = podman`, `image = myproject:latest`, `timeout = 60`
+3. **`commands/run.conf`** — `runtime = podman`, `image = myproject:latest`, `timeout = 60`
 
-### Stem files
-
-Resolved relative to the project root (VCS root or directory containing
-`run.conf`):
+### Command directory layout
 
 ```
-default.run   # always loaded first — project-wide mounts
-default.env   # always loaded first — project-wide env vars
-<stem>.run    # loaded for the matched stem
-<stem>.env    # loaded for the matched stem
-fs/<stem>/    # host-side mount sources
+commands/
+├── run.conf          # project config (image, runtime, timeout, …)
+├── env               # env vars injected for all commands
+├── run               # mounts applied for all commands
+├── help.md           # top-level listing description
+├── build/
+│   ├── main.sh       # ./myproject build → runs this inside the container
+│   ├── env           # additional env vars for build only
+│   └── help.md       # ./myproject build --help
+└── release/
+    ├── package/
+    │   └── main.sh   # ./myproject release package → runs this
+    └── help.md
 ```
 
-`.run` file format:
-
-```
-/absolute/container/path    # bind-mount fs/<stem>/absolute/path here
-@include <name>             # load <name>.run and <name>.env recursively
-# comment
-```
-
-### Symlink dispatch
-
-Creating a symlink to `run.sh` makes the symlink name the stem:
-
-```sh
-ln -s run.sh g++
-./g++ -o hello hello.cpp    # loads g++.run, g++.env, and fs/g++/
-```
+`main.<ext>` probe order: `main` (no extension) → `main.py` → `main.nu` →
+`main.sh` → `main.rb` → `main.js` → `main.pl`.
 
 ## Exit codes
 
@@ -152,7 +160,7 @@ ln -s run.sh g++
 ## Full reference
 
 ```sh
-run --help
+./myproject --help
 ```
 
 ## License

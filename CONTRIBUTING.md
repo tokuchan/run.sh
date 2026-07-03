@@ -21,25 +21,16 @@ workflow below.
 
 ## Development setup
 
-With Nix (recommended):
+Requirements: `sh`, `git` (or `jj`), and `podman` or `docker`. Nothing else.
 
 ```sh
 git clone https://github.com/tokuchan/run.sh
 cd run.sh
-nix develop          # enters devShell with bats, shellcheck, etc.
-make gate            # run the full test suite
+./run.sh test        # builds toolchain container on first run, then runs tests
 ```
 
-Without Nix:
-
-```sh
-# Debian/Ubuntu
-apt-get install bats shellcheck
-# macOS
-brew install bats-core shellcheck
-
-make gate
-```
+The toolchain container provides `bats`, `shellcheck`, and all other dev
+tools. No host install of these tools is required.
 
 ## Test-driven workflow
 
@@ -47,7 +38,7 @@ New features and fixes are implemented test-first:
 
 1. Write a `@test` block in `tests/` — confirm it fails (RED)
 2. Write minimal code in `run.sh` to pass the test (GREEN)
-3. Commit: one commit per behavior, using `make gate` before each commit
+3. Commit: one commit per behavior, running `./run.sh test` before each commit
 
 Each `@test` tests observable behavior through `run.sh`'s public interface.
 Do not test internal functions directly. See `tests/` for existing patterns
@@ -57,7 +48,7 @@ and `tests/helpers/setup.bash` for available fixtures (`setup_fake_runtime`,
 The gate must pass before any commit:
 
 ```sh
-make gate    # runs all bats tests
+./run.sh test    # runs all bats tests inside the toolchain container
 ```
 
 ## Commit format
@@ -78,6 +69,6 @@ under `## [Unreleased]` in `CHANGELOG.md` before committing.
 Please include:
 
 - The `run.sh` version (first line of the script, or `git log -1 --oneline`)
-- Your `run.conf` (with secrets removed)
+- Your `commands/run.conf` (with secrets removed)
 - Full stderr output with the `-v` flag
 - Container runtime and version (`podman --version` or `docker --version`)
