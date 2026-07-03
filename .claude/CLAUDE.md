@@ -1,13 +1,17 @@
 # run.sh project — Claude Code instructions
 
-## Gate command
+## Running tests
 
-The pre-commit gate is:
+**Always** run the test suite via:
 
 ```sh
 ./run.sh test
 ```
 
-This runs the full bats test suite inside the toolchain container.
-No `make` or separate test runner install is required — the container
-provides everything.
+Never run `bats` directly. The authoritative test environment is the
+toolchain container — `./run.sh test` is the only correct way to verify
+the suite, both during development and before committing.
+
+## Gate command
+
+The pre-commit gate is `./run.sh test`. Run it before every commit.
