@@ -8,6 +8,7 @@ setup() {
     setup_fake_vcs "$FIXTURE_DIR"
     setup_fake_runtime
     write_run_conf "image = test:latest"
+    setup_command "echo"
 }
 teardown() { teardown_fixture; }
 

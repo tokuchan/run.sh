@@ -7,6 +7,7 @@ setup() {
     setup_fixture
     setup_fake_vcs "$FIXTURE_DIR"
     setup_fake_runtime
+    setup_command "echo"
 }
 teardown() { teardown_fixture; }
 
@@ -35,7 +36,7 @@ teardown() { teardown_fixture; }
     [[ "$stderr" == *"my-img:1.0"* ]]
 }
 
-@test "run.conf: missing run.conf when no VCS root exits 125" {
+@test "run.conf: missing commands/run.conf when no VCS root exits 125" {
     local bin2="$FIXTURE_DIR/bin2"
     mkdir -p "$bin2"
     printf '#!/bin/sh\nexit 1\n' > "$bin2/jj"

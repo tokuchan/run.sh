@@ -100,7 +100,20 @@ EOF
     export PATH="$bin_dir:$PATH"
 }
 
-# Write a minimal run.conf into FIXTURE_DIR.
+# Write a minimal run.conf into FIXTURE_DIR/commands/run.conf.
 write_run_conf() {
-    printf '%s\n' "$@" > "$FIXTURE_DIR/run.conf"
+    mkdir -p "$FIXTURE_DIR/commands"
+    printf '%s\n' "$@" > "$FIXTURE_DIR/commands/run.conf"
+}
+
+# Create a command directory with a stub main.sh.
+# Usage: setup_command "release/build" [ext]
+# Creates commands/<path>/main.<ext> (default: sh).
+setup_command() {
+    local path="$1"
+    local ext="${2:-sh}"
+    local dir="$FIXTURE_DIR/commands/$path"
+    mkdir -p "$dir"
+    printf '#!/bin/sh\n"$@"\n' > "$dir/main.$ext"
+    chmod +x "$dir/main.$ext"
 }

@@ -28,34 +28,56 @@ teardown() { teardown_fixture; }
     grep -q "devShells" "$FIXTURE_DIR/flake.nix"
 }
 
-@test "init: --init-config writes run.conf to CWD" {
+@test "init: --init-config writes commands/run.conf to CWD" {
     run bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init-config"
     [ "$status" -eq 0 ]
-    [ -f "$FIXTURE_DIR/run.conf" ]
-    grep -q "image" "$FIXTURE_DIR/run.conf"
+    [ -f "$FIXTURE_DIR/commands/run.conf" ]
+    grep -q "image" "$FIXTURE_DIR/commands/run.conf"
+}
+
+@test "init: --init-config warns and skips existing commands/run.conf" {
+    mkdir -p "$FIXTURE_DIR/commands"
+    printf 'existing\n' > "$FIXTURE_DIR/commands/run.conf"
+    run --separate-stderr bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init-config"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"already exists"* ]]
+    [ "$(cat "$FIXTURE_DIR/commands/run.conf")" = "existing" ]
 }
 
 @test "init: --init-container appends gitignore entries" {
     run bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init-container"
     [ "$status" -eq 0 ]
-    grep -qF "fs/default/nix/" "$FIXTURE_DIR/.gitignore"
     grep -qF "result" "$FIXTURE_DIR/.gitignore"
 }
 
 @test "init: --init-container does not duplicate existing gitignore entries" {
-    printf 'fs/default/nix/\nresult\n' > "$FIXTURE_DIR/.gitignore"
+    printf 'result\n' > "$FIXTURE_DIR/.gitignore"
     run bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init-container"
     [ "$status" -eq 0 ]
-    [ "$(grep -c "fs/default/nix/" "$FIXTURE_DIR/.gitignore")" -eq 1 ]
     [ "$(grep -c "^result$" "$FIXTURE_DIR/.gitignore")" -eq 1 ]
 }
 
-@test "init: --init writes all three files" {
+@test "init: --init-commands writes commands/.gitignore with **/fs/" {
+    run bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init-commands"
+    [ "$status" -eq 0 ]
+    [ -f "$FIXTURE_DIR/commands/.gitignore" ]
+    grep -qF '**/fs/' "$FIXTURE_DIR/commands/.gitignore"
+}
+
+@test "init: --init-commands writes commands/help.md" {
+    run bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init-commands"
+    [ "$status" -eq 0 ]
+    [ -f "$FIXTURE_DIR/commands/help.md" ]
+}
+
+@test "init: --init writes all four artifacts" {
     run bash -c "cd \"$FIXTURE_DIR\" && \"$RUN_SH\" --init"
     [ "$status" -eq 0 ]
     [ -f "$FIXTURE_DIR/Dockerfile" ]
     [ -f "$FIXTURE_DIR/flake.nix" ]
-    [ -f "$FIXTURE_DIR/run.conf" ]
+    [ -f "$FIXTURE_DIR/commands/run.conf" ]
+    [ -d "$FIXTURE_DIR/commands" ]
+    [ -f "$FIXTURE_DIR/commands/.gitignore" ]
 }
 
 @test "init: individual --init-* flags are independent" {
@@ -63,5 +85,5 @@ teardown() { teardown_fixture; }
     [ "$status" -eq 0 ]
     [ -f "$FIXTURE_DIR/flake.nix" ]
     [ ! -f "$FIXTURE_DIR/Dockerfile" ]
-    [ ! -f "$FIXTURE_DIR/run.conf" ]
+    [ ! -f "$FIXTURE_DIR/commands/run.conf" ]
 }

@@ -8,6 +8,7 @@ setup() {
     setup_fake_vcs "$FIXTURE_DIR"
     setup_fake_runtime
     write_run_conf "image = test:latest"
+    setup_command "echo"
 }
 teardown() { teardown_fixture; }
 
@@ -20,14 +21,14 @@ teardown() { teardown_fixture; }
     [[ "$stderr" == *"$FIXTURE_DIR/cache/run/nix:/nix"* ]]
 }
 
-@test "nix store: local mode mounts fs/default/nix at /nix in dry-run" {
+@test "nix store: local mode mounts commands/fs/nix at /nix in dry-run" {
     write_run_conf "image = test:latest
 store = local"
-    mkdir -p "$FIXTURE_DIR/fs/default/nix"
-    touch "$FIXTURE_DIR/fs/default/nix/.keep"
+    mkdir -p "$FIXTURE_DIR/commands/fs/nix"
+    touch "$FIXTURE_DIR/commands/fs/nix/.keep"
     run --separate-stderr "$RUN_SH" --dry-run echo hi
     [ "$status" -eq 0 ]
-    [[ "$stderr" == *"$FIXTURE_DIR/fs/default/nix:/nix"* ]]
+    [[ "$stderr" == *"$FIXTURE_DIR/commands/fs/nix:/nix"* ]]
 }
 
 @test "nix store: shared mode creates cache directory if absent" {

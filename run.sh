@@ -45,13 +45,12 @@
 # §01.01 usage
 usage() {
     cat <<'EOF'
-Usage: run [OPTIONS] [STEM] [--] COMMAND [ARGS...]
-       run [OPTIONS] [--] COMMAND [ARGS...]   (stem from argv[0] if symlinked)
+Usage: myproject [OPTIONS] [COMMAND [SUBCOMMAND...]] [--] [ARGS...]
 
 Run a containerized command with project mounts and environment.
+Rename run.sh to match your project name (e.g. "myproject").
 
 Common options:
-  -s, --stem <name>      Load additional stem (repeatable)
   --mirror <path>        Bind-mount path at same location inside container
   --mirror-ro <path>     Same, read-only
   --no-cwd               Do not mirror CWD and project root
@@ -71,17 +70,20 @@ Image management (all default on; use --no-* to suppress):
   --store <mode>              Nix store: shared (default) or local
 
 Bootstrap:
-  --init                 Write Dockerfile, flake.nix, and run.conf to CWD
+  --init                 Write Dockerfile, flake.nix, run.conf, and commands/
   --init-container       Write Dockerfile only
   --init-flake           Write flake.nix only
-  --init-config          Write run.conf only
+  --init-config          Write commands/run.conf only
+  --init-commands        Write commands/ skeleton only
 
-Stem files (resolved from run root):
-  default.run / default.env   always loaded first
-  <stem>.run  / <stem>.env    loaded for matched stem
-  fs/<stem>/                  host-side mount sources
+Command dispatch (resolved from commands/ at project root):
+  commands/run.conf           project config (image, timeout, store, …)
+  commands/<cmd>/main[.ext]   executable for <cmd>
+  commands/<cmd>/env          KEY=VALUE pairs injected per command
+  commands/<cmd>/run          additional bind-mounts per command
+  commands/<cmd>/fs/          host-side mount sources
 
-Run 'run --help' for the full manual with all options and examples.
+Run 'myproject --help' for the full manual with all options and examples.
 EOF
 }
 
@@ -99,32 +101,47 @@ ${SECTION}DESCRIPTION${RESET}
     so compiler output, debugger paths, and tool output are identical on host
     and inside the container.
 
+    Rename run.sh to match your project (e.g. "myproject") and place commands
+    under a commands/ directory at the project root. Each command is a
+    subdirectory with a main[.ext] executable.
+
 ${SECTION}SYNOPSIS${RESET}
-    run [OPTIONS] [STEM] [--] COMMAND [ARGS...]
+    myproject [OPTIONS] [COMMAND [SUBCOMMAND...]] [--] [ARGS...]
 
-    If run.sh is invoked via a symlink, the symlink name is the stem.
-    Otherwise the first non-option argument is the stem.
+    Greedy longest-match dispatch: runs as many directory components as possible
+    before a flag or missing directory stops the walk.
 
-${SECTION}STEM & CONFIGURATION FILES${RESET}
-    Stems select sets of mounts and environment variables. Resolution order:
-      1. default.run + default.env  (always loaded first)
-      2. <stem>.run + <stem>.env    (auto-resolved stem)
-      3. stems listed in run.conf   (project baseline)
-      4. --stem / -s options        (explicit, left-to-right)
+${SECTION}COMMAND DISPATCH${RESET}
+    Commands live under commands/ at the project root (beside commands/run.conf).
+    Run without a command to see a listing of available commands.
 
-    .run file format:
-      /absolute/container/path   bind-mount fs/<stem>/absolute/path here
-      @include <name>            load <name>.run and <name>.env
+    Directory layout:
+      commands/run.conf           project config (image, timeout, store, ...)
+      commands/<cmd>/main[.ext]   the executable (sh, py, nu, rb, js, pl, or
+                                  extension-free shebang script)
+      commands/<cmd>/env          KEY=VALUE pairs injected into the container
+      commands/<cmd>/run          additional bind-mounts (one /container/path
+                                  per line; host source: <cmd>/fs/path)
+      commands/<cmd>/help.md      help text shown by --help and in listings
+      commands/<cmd>/fs/          host-side mount sources
+
+    Configuration is inherited root→leaf; child values override parent values
+    for the same key.
+
+    Injected environment variables:
+      RUN_PROJECT     resolved project name (script basename)
+      RUN_COMMAND     slash-separated matched command path (e.g. release/build)
+      RUN_ROOT        absolute path to the project root
+
+    run file format:
+      /absolute/container/path   bind-mount <cmd>/fs/absolute/path here
       # comment                  ignored
 
-    .env file format:
+    env file format:
       KEY=VALUE                  inject into container environment
       # comment                  ignored
 
 ${SECTION}OPTIONS${RESET}
-  ${SUBSECTION}Stem selection:${RESET}
-    -s, --stem <name>      Load an additional stem (repeatable)
-
   ${SUBSECTION}Mounts:${RESET}
     --mirror <path>        Canonicalize path, bind-mount at same abs path (rw)
     --mirror-ro <path>     Same, read-only
@@ -165,10 +182,15 @@ ${SECTION}OPTIONS${RESET}
     --project-root <path>  Override project root detection
 
   ${SUBSECTION}Bootstrap${RESET} (writes stub files to CWD; never clobbers existing files):
-    --init                 Write Dockerfile, flake.nix, and run.conf
+    --init                 Write Dockerfile, flake.nix, run.conf, and commands/
     --init-container       Write Dockerfile (and append .gitignore entries)
     --init-flake           Write flake.nix with devShells.default
-    --init-config          Write run.conf with image placeholder
+    --init-config          Write commands/run.conf with image placeholder
+    --init-commands        Write commands/ skeleton with .gitignore and help.md
+
+  ${SUBSECTION}Discovery:${RESET}
+    --list-commands        List all available commands (one per line, tab-
+                           separated description when help.md is present)
 
   ${SUBSECTION}General:${RESET}
     -h, --help             Show this manual
@@ -180,9 +202,9 @@ ${SECTION}LOG FORMAT${RESET}
     Severity levels: [DEBUG] [INFO ] [WARN ] [ERROR]
 
     POSIX tool recipes:
-      Filter errors:   run ... 2>&1 | grep '\[ERROR\]'
-      Extract JSON:    run ... 2>&1 | grep -oE '\{[^}]*\}'
-      Clean messages:  run ... 2>&1 | sed 's/ {[^}]*}$//'
+      Filter errors:   myproject ... 2>&1 | grep '\[ERROR\]'
+      Extract JSON:    myproject ... 2>&1 | grep -oE '\{[^}]*\}'
+      Clean messages:  myproject ... 2>&1 | sed 's/ {[^}]*}$//'
 
 ${SECTION}EXIT CODES${RESET}
     Passes through the container command's exit code.
@@ -191,20 +213,26 @@ ${SECTION}EXIT CODES${RESET}
 
 ${SECTION}EXAMPLES${RESET}
     # Bootstrap a new project
-    run --init                         # write Dockerfile, flake.nix, run.conf
+    cp run.sh myproject                # rename to match your project
+    myproject --init                   # write Dockerfile, flake.nix, run.conf, commands/
     \$EDITOR flake.nix                  # add your packages to devShells.default
-    run make all                       # image built automatically on first run
+    \$EDITOR commands/run.conf          # set image = myregistry/myimage:latest
+
+    # Add a command
+    mkdir -p commands/build
+    echo '#!/bin/sh' > commands/build/main.sh
+    echo 'make "\$@"' >> commands/build/main.sh
+    chmod +x commands/build/main.sh
 
     # Daily use
-    run g++ -o hello hello.cpp
-    run -s nix nix build .
-    run --mirror ~/.config -- nvim src/main.c
-    run --dry-run make all
-    ln -s run.sh g++ && ./g++ -o hello hello.cpp
+    myproject build                    # run commands/build/main.sh in container
+    myproject release package --arch=arm64
+    myproject --dry-run build          # preview container invocation
+    myproject                          # show available commands
 
     # Image management
-    run --force-rebuild make all       # rebuild image then run
-    run --clean                        # remove image
+    myproject --force-rebuild build    # rebuild image then run command
+    myproject --clean                  # remove image
 EOF
 }
 
@@ -267,8 +295,8 @@ DOCKERFILE
             wrote=1
         fi
 
-        # Smart-append .gitignore entries
-        for _entry in "fs/default/nix/" "result"; do
+        # Smart-append result to .gitignore
+        for _entry in "result"; do
             if [ -f ".gitignore" ] && grep -qF "$_entry" ".gitignore"; then
                 :
             else
@@ -311,18 +339,44 @@ FLAKE
     fi
 
     if [ "${RUN_INIT_CONFIG:-0}" = "1" ]; then
-        if [ -f "run.conf" ]; then
-            log_warn "run.conf already exists, skipping"
+        if [ -f "commands/run.conf" ]; then
+            log_warn "commands/run.conf already exists, skipping"
         else
-            cat > "run.conf" <<'RUNCONF'
-# run.conf — project configuration for run.sh
+            mkdir -p "commands"
+            cat > "commands/run.conf" <<'RUNCONF'
+# commands/run.conf — project configuration for run.sh
 # Precedence: CLI option > RUN_* env var > this file > built-in default.
 
 image   = run-toolchain:latest
 runtime = podman
 # store = shared   # shared (default) or local (hermetic, per-project)
 RUNCONF
-            log_info "wrote run.conf"
+            log_info "wrote commands/run.conf"
+            wrote=1
+        fi
+    fi
+
+    if [ "${RUN_INIT_COMMANDS:-0}" = "1" ]; then
+        mkdir -p "commands"
+        if [ ! -f "commands/.gitignore" ]; then
+            printf '**/fs/\n' > "commands/.gitignore"
+            log_info "wrote commands/.gitignore"
+            wrote=1
+        fi
+        if [ ! -f "commands/help.md" ]; then
+            printf '# %s\n\nDescribe your project here.\n' \
+                "$(basename "$PWD")" > "commands/help.md"
+            log_info "wrote commands/help.md"
+            wrote=1
+        fi
+        if [ ! -d "commands/hello" ]; then
+            mkdir -p "commands/hello"
+            printf '#!/bin/sh\necho "Hello from %s"\n' \
+                "$(basename "$PWD")" > "commands/hello/main.sh"
+            chmod +x "commands/hello/main.sh"
+            printf '# hello\n\nA sample command. Replace with your own.\n' \
+                > "commands/hello/help.md"
+            log_info "wrote commands/hello/"
             wrote=1
         fi
     fi
@@ -368,13 +422,13 @@ log_error() { _log "ERROR" 0 "$@"; }
 # §03.03  apply_env()     — apply RUN_* env overrides
 # §03.04  parse_args()    — command-line option parsing
 
-_KNOWN_KEYS="image runtime stems project_root verbose quiet dry_run cwd env_host tty build rebuild force_rebuild store timeout"
+_KNOWN_KEYS="image runtime name project_root verbose quiet dry_run cwd env_host tty build rebuild force_rebuild store timeout"
 
 # §03.01 defaults
 defaults() {
     RUN_IMAGE="${RUN_IMAGE:-}"
     RUN_RUNTIME="${RUN_RUNTIME:-}"
-    RUN_STEMS="${RUN_STEMS:-}"
+    RUN_NAME="${RUN_NAME:-}"
     RUN_PROJECT_ROOT="${RUN_PROJECT_ROOT:-}"
     RUN_VERBOSITY="${RUN_VERBOSITY:-1}"
     RUN_DRY_RUN="${RUN_DRY_RUN:-0}"
@@ -389,10 +443,17 @@ defaults() {
     RUN_INIT_CONTAINER="${RUN_INIT_CONTAINER:-0}"
     RUN_INIT_FLAKE="${RUN_INIT_FLAKE:-0}"
     RUN_INIT_CONFIG="${RUN_INIT_CONFIG:-0}"
+    RUN_INIT_COMMANDS="${RUN_INIT_COMMANDS:-0}"
     RUN_PKG_SEARCH="${RUN_PKG_SEARCH:-}"
     RUN_PKG_ADD="${RUN_PKG_ADD:-}"
     RUN_PKG_REMOVE="${RUN_PKG_REMOVE:-}"
     RUN_TIMEOUT="${RUN_TIMEOUT:-0}"
+    RUN_LIST_COMMANDS="${RUN_LIST_COMMANDS:-0}"
+    RUN_RAW_ARGS=""
+    RUN_COMMAND_PATH=""
+    RUN_COMMAND_DIR=""
+    RUN_MAIN=""
+    RUN_REMAINING_ARGS=""
 }
 
 # §03.02 parse_conf
@@ -415,7 +476,7 @@ parse_conf() {
         case "$key" in
             image)        RUN_IMAGE="$value" ;;
             runtime)      RUN_RUNTIME="$value" ;;
-            stems)        RUN_STEMS="$value" ;;
+            name)         RUN_NAME="$value" ;;
             project_root) RUN_PROJECT_ROOT="$value" ;;
             verbose)      RUN_VERBOSITY="$value" ;;
             quiet)        [ "$value" = "1" ] && RUN_VERBOSITY=0 ;;
@@ -441,50 +502,50 @@ apply_env() {
     [ -n "${RUN_NO_CWD+x}"       ] && RUN_CWD=0
 }
 
-# §03.04 parse_args — sets RUN_USER_CMD and RUN_EXPLICIT_STEMS; removes run.sh flags from "$@"
+# §03.04 parse_args — sets RUN_RAW_ARGS; removes run.sh flags from "$@"
 parse_args() {
-    RUN_EXPLICIT_STEMS=""
     RUN_MIRRORS=""
     RUN_MIRRORS_RO=""
-    RUN_USER_CMD=""
+    RUN_RAW_ARGS=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
-            --)            shift; RUN_USER_CMD="$*"; break ;;
-            --dry-run)     RUN_DRY_RUN=1; shift ;;
-            --no-dry-run)  RUN_DRY_RUN=0; shift ;;
-            --cwd)         RUN_CWD=1; shift ;;
-            --no-cwd)      RUN_CWD=0; shift ;;
-            --env-host)    RUN_ENV_HOST=1; shift ;;
-            --no-env-host) RUN_ENV_HOST=0; shift ;;
-            --tty)         RUN_TTY=1; shift ;;
-            --no-tty)      RUN_TTY=0; shift ;;
-            --runtime)     RUN_RUNTIME="$2"; shift 2 ;;
-            --image)       RUN_IMAGE="$2"; shift 2 ;;
-            --project-root) RUN_PROJECT_ROOT="$2"; shift 2 ;;
-            -s|--stem)     RUN_EXPLICIT_STEMS="$RUN_EXPLICIT_STEMS $2"; shift 2 ;;
-            --mirror)      RUN_MIRRORS="$RUN_MIRRORS $(readlink -f "$2")"; shift 2 ;;
-            --mirror-ro)   RUN_MIRRORS_RO="$RUN_MIRRORS_RO $(readlink -f "$2")"; shift 2 ;;
-            -v|--verbose)  RUN_VERBOSITY=$(( RUN_VERBOSITY + 1 )); shift ;;
-            -q|--quiet)    RUN_VERBOSITY=0; shift ;;
-            --build)       RUN_BUILD=1; shift ;;
-            --no-build)    RUN_BUILD=0; shift ;;
-            --rebuild)     RUN_REBUILD=1; shift ;;
-            --no-rebuild)  RUN_REBUILD=0; shift ;;
-            --force-rebuild) RUN_FORCE_REBUILD=1; shift ;;
-            --clean)       RUN_CLEAN=1; shift ;;
-            --store)       RUN_STORE="$2"; shift 2 ;;
-            --init)        RUN_INIT_CONTAINER=1; RUN_INIT_FLAKE=1; RUN_INIT_CONFIG=1; shift ;;
+            --)               shift; RUN_RAW_ARGS="$*"; break ;;
+            --dry-run)        RUN_DRY_RUN=1; shift ;;
+            --no-dry-run)     RUN_DRY_RUN=0; shift ;;
+            --cwd)            RUN_CWD=1; shift ;;
+            --no-cwd)         RUN_CWD=0; shift ;;
+            --env-host)       RUN_ENV_HOST=1; shift ;;
+            --no-env-host)    RUN_ENV_HOST=0; shift ;;
+            --tty)            RUN_TTY=1; shift ;;
+            --no-tty)         RUN_TTY=0; shift ;;
+            --runtime)        RUN_RUNTIME="$2"; shift 2 ;;
+            --image)          RUN_IMAGE="$2"; shift 2 ;;
+            --project-root)   RUN_PROJECT_ROOT="$2"; shift 2 ;;
+            --mirror)         RUN_MIRRORS="$RUN_MIRRORS $(readlink -f "$2")"; shift 2 ;;
+            --mirror-ro)      RUN_MIRRORS_RO="$RUN_MIRRORS_RO $(readlink -f "$2")"; shift 2 ;;
+            -v|--verbose)     RUN_VERBOSITY=$(( RUN_VERBOSITY + 1 )); shift ;;
+            -q|--quiet)       RUN_VERBOSITY=0; shift ;;
+            --build)          RUN_BUILD=1; shift ;;
+            --no-build)       RUN_BUILD=0; shift ;;
+            --rebuild)        RUN_REBUILD=1; shift ;;
+            --no-rebuild)     RUN_REBUILD=0; shift ;;
+            --force-rebuild)  RUN_FORCE_REBUILD=1; shift ;;
+            --clean)          RUN_CLEAN=1; shift ;;
+            --store)          RUN_STORE="$2"; shift 2 ;;
+            --init)           RUN_INIT_CONTAINER=1; RUN_INIT_FLAKE=1; RUN_INIT_CONFIG=1; RUN_INIT_COMMANDS=1; shift ;;
             --init-container) RUN_INIT_CONTAINER=1; shift ;;
-            --init-flake)  RUN_INIT_FLAKE=1; shift ;;
-            --init-config) RUN_INIT_CONFIG=1; shift ;;
-            --timeout)     RUN_TIMEOUT="$2"; _CLI_TIMEOUT_SET=1; shift 2 ;;
-            --search)      RUN_PKG_SEARCH="$2"; shift 2 ;;
-            --add)         RUN_PKG_ADD="$RUN_PKG_ADD $2"; shift 2 ;;
-            --remove)      RUN_PKG_REMOVE="$RUN_PKG_REMOVE $2"; shift 2 ;;
-            --help|-h)     help; exit 0 ;;
-            -*)            log_error "unknown option: $1"; exit 125 ;;
-            *)             RUN_USER_CMD="$*"; break ;;
+            --init-flake)     RUN_INIT_FLAKE=1; shift ;;
+            --init-config)    RUN_INIT_CONFIG=1; shift ;;
+            --init-commands)  RUN_INIT_COMMANDS=1; shift ;;
+            --timeout)        RUN_TIMEOUT="$2"; _CLI_TIMEOUT_SET=1; shift 2 ;;
+            --search)         RUN_PKG_SEARCH="$2"; shift 2 ;;
+            --add)            RUN_PKG_ADD="$RUN_PKG_ADD $2"; shift 2 ;;
+            --remove)         RUN_PKG_REMOVE="$RUN_PKG_REMOVE $2"; shift 2 ;;
+            --list-commands)  RUN_LIST_COMMANDS=1; shift ;;
+            --help|-h)        help; exit 0 ;;
+            -*)               log_error "unknown option: $1"; exit 125 ;;
+            *)                RUN_RAW_ARGS="$*"; break ;;
         esac
     done
 }
@@ -496,6 +557,7 @@ parse_args() {
 
 # §04.01 find_run_root
 # Sets RUN_RUN_ROOT global; returns 1 on failure (never calls exit — caller must handle).
+# Run root is identified by the presence of commands/run.conf.
 find_run_root() {
     if [ -n "$RUN_PROJECT_ROOT" ]; then
         RUN_RUN_ROOT="$RUN_PROJECT_ROOT"
@@ -503,103 +565,239 @@ find_run_root() {
     fi
 
     local root
-    root="$(jj root 2>/dev/null)" && RUN_RUN_ROOT="$root" && return 0
-    root="$(git rev-parse --show-toplevel 2>/dev/null)" && RUN_RUN_ROOT="$root" && return 0
+    root="$(jj root 2>/dev/null)"
+    if [ -n "$root" ] && [ -f "$root/commands/run.conf" ]; then
+        RUN_RUN_ROOT="$root"; return 0
+    fi
+    root="$(git rev-parse --show-toplevel 2>/dev/null)"
+    if [ -n "$root" ] && [ -f "$root/commands/run.conf" ]; then
+        RUN_RUN_ROOT="$root"; return 0
+    fi
     local dir="$PWD"
     while [ "$dir" != "/" ]; do
-        [ -f "$dir/run.conf" ] && RUN_RUN_ROOT="$dir" && return 0
+        [ -f "$dir/commands/run.conf" ] && RUN_RUN_ROOT="$dir" && return 0
         dir="$(dirname "$dir")"
     done
-    log_error "cannot find run root (no jj/git root and no run.conf in any ancestor directory)"
+    log_error "cannot find run root (no commands/run.conf in any ancestor directory)"
     return 1
 }
 
 # ─────────────────────────────────────────────────────────────
-# §05 STEM RESOLUTION
+# §05 COMMAND DISPATCH
 # ─────────────────────────────────────────────────────────────
-# §05.01  parse_env_file()  — parse KEY=VALUE env file into RUN_ENV_PAIRS
+# §05.01  dispatch_command()      — greedy walk into commands/ tree
+# §05.02  probe_main()            — find main.<ext> in a directory
+# §05.03  load_command_config()   — load run/env files root→leaf, last-wins
+# §05.04  set_mount()             — add/replace mount by container dest
+# §05.05  set_env()               — add/replace env var by key
+# §05.06  show_command_listing()  — auto-generated sub-command list
+# §05.07  show_list_commands()    — machine-readable recursive command list
 
-# ─────────────────────────────────────────────────────────────
-# §05 STEM RESOLUTION
-# ─────────────────────────────────────────────────────────────
-# §05.01  resolve_stem()    — symlink dispatch → first positional word
-# §05.02  parse_env_file()  — parse KEY=VALUE env file into RUN_ENV_PAIRS
-# §05.03  parse_run_file()  — parse mount paths and @include directives
-# §05.04  load_explicit_stems() — load stems from -s options
+# §05.01 dispatch_command ARGS...
+# Greedy walk into commands/ using positional args. Stops at first -flag token
+# or when no child directory matches. Sets globals:
+#   RUN_COMMAND_PATH  — slash-separated path of matched dirs (e.g. "release/build")
+#   RUN_COMMAND_DIR   — absolute path of matched directory
+#   RUN_REMAINING_ARGS — remaining tokens after the walk (space-separated string)
+#   RUN_MAIN          — absolute path to main.<ext>, or "" if not found
+dispatch_command() {
+    RUN_COMMAND_PATH=""
+    RUN_COMMAND_DIR="$RUN_RUN_ROOT/commands"
+    RUN_REMAINING_ARGS=""
+    RUN_MAIN=""
 
-# §05.01 resolve_stem
-# Sets RUN_STEM. If basename($0) != run.sh, uses that; otherwise uses
-# the first word of RUN_USER_CMD (which remains unchanged — the stem
-# name is also the first word of the command passed to the container).
-resolve_stem() {
-    local script_name
-    script_name="$(basename "$0")"
-    if [ "$script_name" != "run.sh" ]; then
-        RUN_STEM="$script_name"
-    else
-        RUN_STEM="${RUN_USER_CMD%% *}"
-    fi
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -*) break ;;
+        esac
+        local next="$RUN_COMMAND_DIR/$1"
+        if [ -d "$next" ]; then
+            if [ -n "$RUN_COMMAND_PATH" ]; then
+                RUN_COMMAND_PATH="$RUN_COMMAND_PATH/$1"
+            else
+                RUN_COMMAND_PATH="$1"
+            fi
+            RUN_COMMAND_DIR="$next"
+            shift
+        else
+            break
+        fi
+    done
+    RUN_REMAINING_ARGS="$*"
+    probe_main "$RUN_COMMAND_DIR"
 }
 
-# §05.04 load_explicit_stems
-# Loads each stem listed in RUN_EXPLICIT_STEMS (space-separated).
-load_explicit_stems() {
-    local stem
-    for stem in $RUN_EXPLICIT_STEMS; do
-        parse_run_file "$stem" "$RUN_RUN_ROOT/${stem}.run"
-        parse_env_file "$RUN_RUN_ROOT/${stem}.env"
+# §05.02 probe_main DIR
+# Sets RUN_MAIN to the first executable main.<ext> found in DIR.
+# Probe order: main, main.py, main.nu, main.sh, main.rb, main.js, main.pl
+probe_main() {
+    local dir="$1"
+    local ext
+    for ext in "" ".py" ".nu" ".sh" ".rb" ".js" ".pl"; do
+        local candidate="$dir/main${ext}"
+        if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+            RUN_MAIN="$candidate"
+            return 0
+        fi
+    done
+    RUN_MAIN=""
+}
+
+# §05.03 load_command_config COMMAND_PATH
+# Loads run/env files from commands/ root down to the matched command directory.
+# Mount specs and env vars accumulate; conflicts resolved last-wins (deepest dir wins).
+load_command_config() {
+    local command_path="$1"
+    local dirs="$RUN_RUN_ROOT/commands"
+    local current="$RUN_RUN_ROOT/commands"
+
+    if [ -n "$command_path" ]; then
+        local remaining="$command_path"
+        while [ -n "$remaining" ]; do
+            local segment="${remaining%%/*}"
+            current="$current/$segment"
+            dirs="$dirs $current"
+            if [ "$remaining" = "$segment" ]; then
+                remaining=""
+            else
+                remaining="${remaining#*/}"
+            fi
+        done
+    fi
+
+    local dir
+    for dir in $dirs; do
+        local run_file=""
+        [ -f "$dir/run" ]     && run_file="$dir/run"
+        [ -f "$dir/run.txt" ] && run_file="$dir/run.txt"
+        if [ -n "$run_file" ]; then
+            local line
+            while IFS= read -r line; do
+                case "$line" in
+                    ''|'#'*) continue ;;
+                    /*)
+                        local container_path="$line" ro_suffix=""
+                        case "$line" in *:ro) container_path="${line%:ro}"; ro_suffix=":ro" ;; esac
+                        set_mount "${dir}/fs${container_path}:${container_path}${ro_suffix}"
+                        ;;
+                    *) log_warn "ignoring unrecognized line in $run_file: $line" ;;
+                esac
+            done < "$run_file"
+        fi
+
+        local env_file=""
+        [ -f "$dir/env" ]     && env_file="$dir/env"
+        [ -f "$dir/env.txt" ] && env_file="$dir/env.txt"
+        if [ -n "$env_file" ]; then
+            local line
+            while IFS= read -r line; do
+                case "$line" in
+                    ''|'#'*) continue ;;
+                    *) set_env "$line" ;;
+                esac
+            done < "$env_file"
+        fi
     done
 }
 
-# §05.01 parse_env_file FILE
-# Appends parsed KEY=VALUE pairs to RUN_ENV_PAIRS (newline-separated).
-parse_env_file() {
-    local file="$1"
-    [ -f "$file" ] || return 0
-    local line
-    while IFS= read -r line; do
-        case "$line" in
-            ''|'#'*) continue ;;
-        esac
-        RUN_ENV_PAIRS="${RUN_ENV_PAIRS}${line}
+# §05.04 set_mount SPEC
+# Adds or replaces a mount in RUN_MOUNT_PAIRS, keyed by container destination.
+set_mount() {
+    local spec="$1"
+    local container_dest
+    container_dest="$(printf '%s' "$spec" | cut -d: -f2)"
+    local new_pairs=""
+    while IFS= read -r pair; do
+        [ -z "$pair" ] && continue
+        local existing_dest
+        existing_dest="$(printf '%s' "$pair" | cut -d: -f2)"
+        [ "$existing_dest" = "$container_dest" ] && continue
+        new_pairs="${new_pairs}${pair}
 "
-    done < "$file"
+    done <<_MOUNTS_
+$RUN_MOUNT_PAIRS
+_MOUNTS_
+    RUN_MOUNT_PAIRS="${new_pairs}${spec}
+"
 }
 
-# §05.02 parse_run_file STEM FILE
-# Appends bind-mount specs to RUN_MOUNT_PAIRS (host:container per line).
-# Recursively processes @include directives (stem name, not file path).
-# Guards against infinite include loops via RUN_INCLUDE_SEEN.
-parse_run_file() {
-    local stem="$1" file="$2"
-    [ -f "$file" ] || return 0
-
-    local seen_key="<<<${stem}>>>"
-    case "$RUN_INCLUDE_SEEN" in
-        *"$seen_key"*) log_warn "@include loop detected for stem '$stem', skipping"; return 0 ;;
-    esac
-    RUN_INCLUDE_SEEN="${RUN_INCLUDE_SEEN}${seen_key}"
-
-    local line
-    while IFS= read -r line; do
-        case "$line" in
-            ''|'#'*) continue ;;
-            '@include '*)
-                local inc_stem="${line#@include }"
-                inc_stem="$(printf '%s' "$inc_stem" | tr -d ' ')"
-                parse_run_file "$inc_stem" "$RUN_RUN_ROOT/${inc_stem}.run"
-                parse_env_file "$RUN_RUN_ROOT/${inc_stem}.env"
-                ;;
-            /*)
-                local host_path="${RUN_RUN_ROOT}/fs/${stem}${line}"
-                RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${host_path}:${line}
+# §05.05 set_env SPEC
+# Adds or replaces an env var in RUN_ENV_PAIRS, keyed by variable name.
+set_env() {
+    local spec="$1"
+    local key="${spec%%=*}"
+    local new_pairs=""
+    while IFS= read -r pair; do
+        [ -z "$pair" ] && continue
+        [ "${pair%%=*}" = "$key" ] && continue
+        new_pairs="${new_pairs}${pair}
 "
-                ;;
-            *)
-                log_warn "ignoring unrecognized line in ${file}: $line"
-                ;;
-        esac
-    done < "$file"
+    done <<_ENVS_
+$RUN_ENV_PAIRS
+_ENVS_
+    RUN_ENV_PAIRS="${new_pairs}${spec}
+"
+}
+
+# §05.06 show_command_listing DIR
+# Prints help.md first paragraph (if present), then immediate child commands.
+show_command_listing() {
+    local dir="$1"
+    local help_file=""
+    [ -f "$dir/help.md" ]  && help_file="$dir/help.md"
+    [ -f "$dir/help.txt" ] && help_file="$dir/help.txt"
+    if [ -n "$help_file" ]; then
+        local line blank_seen=0
+        while IFS= read -r line; do
+            [ -z "$line" ] && { [ "$blank_seen" = "1" ] && break || blank_seen=1; continue; }
+            printf '%s\n' "$line"
+        done < "$help_file"
+        printf '\n'
+    fi
+    printf 'Commands:\n'
+    local child
+    for child in "$dir"/*/; do
+        [ -d "$child" ] || continue
+        local name
+        name="$(basename "$child")"
+        local desc=""
+        local child_help=""
+        [ -f "$child/help.md" ]  && child_help="$child/help.md"
+        [ -f "$child/help.txt" ] && child_help="$child/help.txt"
+        if [ -n "$child_help" ]; then
+            desc="$(head -1 "$child_help")"
+            desc="${desc## }"
+        fi
+        if [ -n "$desc" ]; then
+            printf '  %-20s  %s\n' "$name" "$desc"
+        else
+            printf '  %s\n' "$name"
+        fi
+    done
+}
+
+# §05.07 show_list_commands DIR [PREFIX]
+# Recursively prints slash-separated command paths, tab + first help line if present.
+show_list_commands() {
+    local dir="$1" prefix="${2:-}"
+    local child
+    for child in "$dir"/*/; do
+        [ -d "$child" ] || continue
+        local name
+        name="$(basename "$child")"
+        local path
+        if [ -n "$prefix" ]; then path="$prefix/$name"; else path="$name"; fi
+        local desc=""
+        [ -f "$child/help.md" ]  && desc="$(head -1 "$child/help.md")"
+        [ -f "$child/help.txt" ] && desc="$(head -1 "$child/help.txt")"
+        desc="${desc## }"
+        if [ -n "$desc" ]; then
+            printf '%s\t%s\n' "$path" "$desc"
+        else
+            printf '%s\n' "$path"
+        fi
+        show_list_commands "$child" "$path"
+    done
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -735,7 +933,7 @@ mount_nix_store() {
     local store_root
     case "${RUN_STORE:-shared}" in
         local)
-            store_root="${RUN_RUN_ROOT}/fs/default/nix"
+            store_root="${RUN_RUN_ROOT}/commands/fs/nix"
             ;;
         *)
             local cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
@@ -1027,32 +1225,87 @@ main() {
     # Init mode: write stub files and exit immediately (no run root needed).
     if [ "${RUN_INIT_CONTAINER:-0}" = "1" ] || \
        [ "${RUN_INIT_FLAKE:-0}"     = "1" ] || \
-       [ "${RUN_INIT_CONFIG:-0}"    = "1" ]; then
+       [ "${RUN_INIT_CONFIG:-0}"    = "1" ] || \
+       [ "${RUN_INIT_COMMANDS:-0}"  = "1" ]; then
         do_init
     fi
 
     find_run_root || exit 125
 
-    parse_conf "$RUN_RUN_ROOT/run.conf"
+    parse_conf "$RUN_RUN_ROOT/commands/run.conf"
     apply_env
 
-    resolve_stem
+    # Rename warning: emit if basename($0) doesn't match expected project name.
+    local _script_name
+    _script_name="$(basename "$0")"
+    local _expected_name="${RUN_NAME:-$(basename "$RUN_RUN_ROOT")}"
+    if [ "$_script_name" != "$_expected_name" ]; then
+        log_warn "rename suggested: script name is '$_script_name' but project expects '$_expected_name'"
+    fi
 
+    # --list-commands: print machine-readable command list and exit.
+    if [ "${RUN_LIST_COMMANDS:-0}" = "1" ]; then
+        show_list_commands "$RUN_RUN_ROOT/commands"
+        exit 0
+    fi
+
+    # Command dispatch: greedy walk into commands/ tree.
+    # shellcheck disable=SC2086
+    dispatch_command $RUN_RAW_ARGS
+
+    # --help after command path: show command-specific help and exit.
+    case "$RUN_REMAINING_ARGS" in
+        --help*|-h\ *|-h)
+            local _help_file=""
+            [ -f "$RUN_COMMAND_DIR/help.md" ]  && _help_file="$RUN_COMMAND_DIR/help.md"
+            [ -f "$RUN_COMMAND_DIR/help.txt" ] && _help_file="$RUN_COMMAND_DIR/help.txt"
+            if [ -n "$_help_file" ]; then
+                if [ -t 1 ] && command -v less >/dev/null 2>&1; then
+                    less -FRX "$_help_file"
+                else
+                    cat "$_help_file"
+                fi
+            else
+                help
+            fi
+            exit 0
+            ;;
+    esac
+
+    # Accumulate mounts and env vars from command hierarchy.
     RUN_ENV_PAIRS=""
     RUN_MOUNT_PAIRS=""
-    RUN_INCLUDE_SEEN=""
+    load_command_config "$RUN_COMMAND_PATH"
 
-    # Load order: default → resolved stem → run.conf stems → -s explicit stems
-    parse_run_file "default" "$RUN_RUN_ROOT/default.run"
-    parse_env_file "$RUN_RUN_ROOT/default.env"
-    if [ -n "$RUN_STEM" ] && [ "$RUN_STEM" != "default" ]; then
-        parse_run_file "$RUN_STEM" "$RUN_RUN_ROOT/${RUN_STEM}.run"
-        parse_env_file "$RUN_RUN_ROOT/${RUN_STEM}.env"
+    # Inject read-only runner metadata (cannot be overridden by command env files).
+    set_env "RUN_PROJECT=$_expected_name"
+    set_env "RUN_COMMAND=${RUN_COMMAND_PATH:-}"
+    set_env "RUN_ROOT=$RUN_RUN_ROOT"
+
+    # Package management / --clean: need the runtime but not a command main.
+    if [ "${RUN_CLEAN:-0}" = "1" ] || \
+       [ -n "${RUN_PKG_SEARCH:-}" ] || \
+       [ -n "${RUN_PKG_ADD:-}" ] || \
+       [ -n "${RUN_PKG_REMOVE:-}" ]; then
+        detect_runtime || exit 125
+        manage_image
+        manage_packages
     fi
-    load_explicit_stems
+
+    # No main found: show listing and exit (no runtime needed).
+    if [ -z "$RUN_MAIN" ]; then
+        show_command_listing "$RUN_COMMAND_DIR"
+        exit 0
+    fi
+
+    # Build RUN_USER_CMD from the resolved main + remaining args.
+    RUN_USER_CMD="$RUN_MAIN"
+    if [ -n "$RUN_REMAINING_ARGS" ]; then
+        RUN_USER_CMD="$RUN_USER_CMD $RUN_REMAINING_ARGS"
+    fi
+
     detect_runtime || exit 125
     manage_image
-    manage_packages
     mount_nix_store
 
     build_cwd_mounts

@@ -6,6 +6,26 @@ Versions are date codes: `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Added
+- Command directory dispatch: `commands/` tree replaces the stem system. Each
+  command is a directory containing `main[.ext]`, `env`, `run`, and `help.md`.
+  Greedy longest-match walk selects the deepest matching directory before a flag
+  or missing entry stops the traversal.
+- Hierarchical config inheritance: `env` and `run` files accumulate root→leaf;
+  child values override parent values for the same key.
+- `--init-commands` scaffolds the `commands/` skeleton with `.gitignore` and
+  `help.md`.
+- `--list-commands` lists all available commands with optional tab-separated
+  description from `help.md`.
+- `RUN_PROJECT`, `RUN_COMMAND`, `RUN_ROOT` injected as environment variables
+  into the container.
+- `commands/run.conf` is the new project config root (replaces root-level
+  `run.conf`).
+
+### Removed
+- Stem system (`-s`/`--stem`, `.run`/`.env` stem files, `@include` directives,
+  `fs/<stem>/` mount sources) replaced by command directory dispatch.
+
 ## [2026-06-24]
 
 ### Added
