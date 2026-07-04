@@ -95,9 +95,17 @@ git commit -m "chore: update run.sh"
   file references are the same on host and inside the container.
 
 - **Per-command configuration** — each command directory may have an `env`
-  file (KEY=VALUE pairs) and a `run` file (bind-mount specs). Configuration
-  accumulates root→leaf; child values override parent values for the same
-  key. `RUN_PROJECT`, `RUN_COMMAND`, and `RUN_ROOT` are always injected.
+  file (KEY=VALUE pairs), a `mount` file (bind-mount specs), and a `conf`
+  file (per-command settings). Configuration accumulates root→leaf; child
+  values override parent values for the same key. `RUN_PROJECT`,
+  `RUN_COMMAND`, and `RUN_ROOT` are always injected.
+
+- **Host dispatch** — a command normally runs inside the container, but
+  setting `dispatch = host` in its `conf` file runs `main.<ext>` directly on
+  the host instead — for commands that must drive another container runtime
+  or otherwise can't run nested. `env` vars and `RUN_PROJECT`/`RUN_COMMAND`/
+  `RUN_ROOT` are still exported into the host process; mounts, image
+  management, and `--timeout` don't apply and are skipped.
 
 - **Auto-build / auto-rebuild** — builds the container image when absent;
   detects `Dockerfile` changes via fingerprint label and rebuilds
@@ -134,7 +142,7 @@ Three surfaces, in precedence order (highest first):
 commands/
 ├── run.conf          # project config (image, runtime, timeout, …)
 ├── env               # env vars injected for all commands
-├── run               # mounts applied for all commands
+├── mount             # mounts applied for all commands
 ├── help.md           # top-level listing description
 ├── build/
 │   ├── main.sh       # ./myproject build → runs this inside the container
@@ -142,7 +150,8 @@ commands/
 │   └── help.md       # ./myproject build --help
 └── release/
     ├── package/
-    │   └── main.sh   # ./myproject release package → runs this
+    │   ├── main.sh   # ./myproject release package → runs this
+    │   └── conf      # dispatch = host — runs on the host, not the container
     └── help.md
 ```
 

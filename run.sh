@@ -80,7 +80,7 @@ Command dispatch (resolved from commands/ at project root):
   commands/run.conf           project config (image, timeout, store, …)
   commands/<cmd>/main[.ext]   executable for <cmd>
   commands/<cmd>/env          KEY=VALUE pairs injected per command
-  commands/<cmd>/run          additional bind-mounts per command
+  commands/<cmd>/mount        additional bind-mounts per command
   commands/<cmd>/conf         per-command settings (dispatch = host|container)
   commands/<cmd>/fs/          host-side mount sources
 
@@ -121,7 +121,7 @@ ${SECTION}COMMAND DISPATCH${RESET}
       commands/<cmd>/main[.ext]   the executable (sh, py, nu, rb, js, pl, or
                                   extension-free shebang script)
       commands/<cmd>/env          KEY=VALUE pairs injected into the container
-      commands/<cmd>/run          additional bind-mounts (one /container/path
+      commands/<cmd>/mount        additional bind-mounts (one /container/path
                                   per line; host source: <cmd>/fs/path)
       commands/<cmd>/conf         per-command settings (dispatch = host|container)
       commands/<cmd>/help.md      help text shown by --help and in listings
@@ -135,7 +135,7 @@ ${SECTION}COMMAND DISPATCH${RESET}
       'dispatch = host' in commands/<cmd>/conf to run that command's main
       directly on the host instead — useful for commands that must manage
       another container runtime, or otherwise cannot run nested inside this
-      one. Inherited root->leaf like env/run; the deepest explicit setting
+      one. Inherited root->leaf like env/mount; the deepest explicit setting
       wins. commands/env vars (plus RUN_PROJECT, RUN_COMMAND, RUN_ROOT) are
       still exported into the host process environment. Mounts, --timeout,
       and image management are irrelevant on the host and are skipped
@@ -146,7 +146,7 @@ ${SECTION}COMMAND DISPATCH${RESET}
       RUN_COMMAND     slash-separated matched command path (e.g. release/build)
       RUN_ROOT        absolute path to the project root
 
-    run file format:
+    mount file format:
       /absolute/container/path   bind-mount <cmd>/fs/absolute/path here
       # comment                  ignored
 
@@ -600,7 +600,7 @@ find_run_root() {
 # ─────────────────────────────────────────────────────────────
 # §05.01  dispatch_command()      — greedy walk into commands/ tree
 # §05.02  probe_main()            — find main.<ext> in a directory
-# §05.03  load_command_config()   — load run/env/conf files root→leaf, last-wins
+# §05.03  load_command_config()   — load mount/env/conf files root→leaf, last-wins
 # §05.04  set_mount()             — add/replace mount by container dest
 # §05.05  set_env()               — add/replace env var by key
 # §05.06  show_command_listing()  — auto-generated sub-command list
@@ -657,10 +657,12 @@ probe_main() {
 }
 
 # §05.03 load_command_config COMMAND_PATH
-# Loads run/env/conf files from commands/ root down to the matched command
+# Loads mount/env/conf files from commands/ root down to the matched command
 # directory. Mount specs and env vars accumulate; conflicts resolved
 # last-wins (deepest dir wins). RUN_DISPATCH (host|container) is likewise
 # resolved last-wins from each level's conf file, defaulting to "container".
+# A leftover run/run.txt file at any level is a hard error (exit 125) —
+# see ADR-0018.
 load_command_config() {
     local command_path="$1"
     local dirs="$RUN_RUN_ROOT/commands"
@@ -684,10 +686,15 @@ load_command_config() {
 
     local dir
     for dir in $dirs; do
-        local run_file=""
-        [ -f "$dir/run" ]     && run_file="$dir/run"
-        [ -f "$dir/run.txt" ] && run_file="$dir/run.txt"
-        if [ -n "$run_file" ]; then
+        if [ -f "$dir/run" ] || [ -f "$dir/run.txt" ]; then
+            log_error "$dir uses the old 'run'/'run.txt' mount file; rename it to 'mount'/'mount.txt'"
+            exit 125
+        fi
+
+        local mount_file=""
+        [ -f "$dir/mount" ]     && mount_file="$dir/mount"
+        [ -f "$dir/mount.txt" ] && mount_file="$dir/mount.txt"
+        if [ -n "$mount_file" ]; then
             local line
             while IFS= read -r line; do
                 case "$line" in
@@ -697,9 +704,12 @@ load_command_config() {
                         case "$line" in *:ro) container_path="${line%:ro}"; ro_suffix=":ro" ;; esac
                         set_mount "${dir}/fs${container_path}:${container_path}${ro_suffix}"
                         ;;
-                    *) log_warn "ignoring unrecognized line in $run_file: $line" ;;
+                    *)
+                        log_error "unrecognized line in $mount_file: $line (non-mount settings belong in 'conf')"
+                        exit 125
+                        ;;
                 esac
-            done < "$run_file"
+            done < "$mount_file"
         fi
 
         local env_file=""

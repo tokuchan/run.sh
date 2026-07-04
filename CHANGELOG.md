@@ -12,6 +12,12 @@ Versions are date codes: `YYYY-MM-DD`.
   inside the toolchain container, replacing `make test` / `make gate`.
 - `.claude/CLAUDE.md` documents the gate command (`./run.sh test`) for the
   `/commit` skill.
+- `commands/<cmd>/conf` (or `conf.txt`): per-command settings file, `key =
+  value` per line. Recognizes `dispatch = host|container` (default
+  `container`) — `host` runs that command's `main.<ext>` directly on the
+  host instead of inside the container, exporting `env` vars and
+  `RUN_PROJECT`/`RUN_COMMAND`/`RUN_ROOT` into the host process first.
+  Inherited root→leaf like other command config. `docs/adr/0017`.
 
 ### Removed
 - `Makefile` — eliminated; `./run.sh test` replaces all targets.
@@ -24,6 +30,12 @@ Versions are date codes: `YYYY-MM-DD`.
 - `CONTRIBUTING.md`: removed `make gate` references; updated dev setup to
   `./run.sh test`; requirements now list only `sh`, `git`/`jj`, and a
   container runtime.
+- `commands/<cmd>/run`/`run.txt` renamed to `commands/<cmd>/mount`/
+  `mount.txt` — no coexistence; a leftover `run`/`run.txt` now exits 125
+  pointing at the rename instead of silently dropping its mounts. A line in
+  `mount` that isn't a mount spec, comment, or blank is now a hard error
+  (exit 125) directing non-mount settings to `conf`, replacing the previous
+  warn-and-ignore behavior. `docs/adr/0018`.
 
 ### Added (dispatch, carried forward)
 - Command directory dispatch: `commands/` tree replaces the stem system. Each

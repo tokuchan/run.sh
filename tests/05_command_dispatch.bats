@@ -108,11 +108,11 @@ teardown() { teardown_fixture; }
     [[ "$stderr" != *"MYVAR=parent"* ]]
 }
 
-# ── behavior 7: root run mounts inherited ─────────────────────────────────
+# ── behavior 7: root mount file inherited ─────────────────────────────────
 
-@test "config: commands/run mounts appear for all commands" {
+@test "config: commands/mount mounts appear for all commands" {
     mkdir -p "$FIXTURE_DIR/commands/fs/data"
-    printf '/data\n' > "$FIXTURE_DIR/commands/run"
+    printf '/data\n' > "$FIXTURE_DIR/commands/mount"
     setup_command "hello"
     run --separate-stderr "$RUN_SH" --dry-run hello
     [ "$status" -eq 0 ]
@@ -121,11 +121,11 @@ teardown() { teardown_fixture; }
 
 # ── behavior 8: child mount overrides parent for same container dest ──────
 
-@test "config: child run overrides parent mount for same container path" {
+@test "config: child mount overrides parent mount for same container path" {
     mkdir -p "$FIXTURE_DIR/commands/fs/data" \
              "$FIXTURE_DIR/commands/hello/fs/data"
-    printf '/data\n' > "$FIXTURE_DIR/commands/run"
-    printf '/data\n' > "$FIXTURE_DIR/commands/hello/run"
+    printf '/data\n' > "$FIXTURE_DIR/commands/mount"
+    printf '/data\n' > "$FIXTURE_DIR/commands/hello/mount"
     setup_command "hello"
     run --separate-stderr "$RUN_SH" --dry-run hello
     [ "$status" -eq 0 ]
@@ -133,6 +133,32 @@ teardown() { teardown_fixture; }
     local count
     count="$(printf '%s' "$stderr" | grep -c "/data" || true)"
     [ "$count" -eq 1 ]
+}
+
+# ── behavior 8b: leftover run/run.txt is a hard error (ADR-0018) ──────────
+
+@test "config: leftover commands/<cmd>/run exits 125 pointing at the rename" {
+    setup_command "hello"
+    printf '/data\n' > "$FIXTURE_DIR/commands/hello/run"
+    run --separate-stderr "$RUN_SH" --dry-run hello
+    [ "$status" -eq 125 ]
+    [[ "$stderr" == *"rename it to 'mount'"* ]]
+}
+
+@test "config: leftover root commands/run.txt exits 125" {
+    setup_command "hello"
+    printf '/data\n' > "$FIXTURE_DIR/commands/run.txt"
+    run --separate-stderr "$RUN_SH" --dry-run hello
+    [ "$status" -eq 125 ]
+    [[ "$stderr" == *"rename it to 'mount'"* ]]
+}
+
+@test "config: unrecognized line in mount file exits 125 pointing at conf" {
+    setup_command "hello"
+    printf 'not-a-mount-spec\n' > "$FIXTURE_DIR/commands/hello/mount"
+    run --separate-stderr "$RUN_SH" --dry-run hello
+    [ "$status" -eq 125 ]
+    [[ "$stderr" == *"non-mount settings belong in 'conf'"* ]]
 }
 
 # ── behavior 9: no-main fallback ──────────────────────────────────────────
