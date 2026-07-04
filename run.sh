@@ -136,15 +136,31 @@ ${SECTION}COMMAND DISPATCH${RESET}
       directly on the host instead — useful for commands that must manage
       another container runtime, or otherwise cannot run nested inside this
       one. Inherited root->leaf like env/mount; the deepest explicit setting
-      wins. commands/env vars (plus RUN_PROJECT, RUN_COMMAND, RUN_ROOT) are
-      still exported into the host process environment. Mounts, --timeout,
-      and image management are irrelevant on the host and are skipped
-      (with a warning if explicitly requested).
+      wins. commands/env vars (plus RUN_PROJECT, RUN_COMMAND, RUN_ROOT,
+      RUN_CONTAINER_RUNTIME, RUN_CONTAINER_IMAGE) are still exported into
+      the host process environment — RUN_CONTAINER_RUNTIME/
+      RUN_CONTAINER_IMAGE are resolved on a best-effort basis and may be
+      empty if no runtime is installed, since a host command that doesn't
+      touch containers shouldn't require one. Mounts, --timeout, and image
+      management are irrelevant on the host and are skipped (with a
+      warning if explicitly requested).
 
     Injected environment variables:
-      RUN_PROJECT     resolved project name (script basename)
-      RUN_COMMAND     slash-separated matched command path (e.g. release/build)
-      RUN_ROOT        absolute path to the project root
+      RUN_PROJECT             resolved project name (script basename)
+      RUN_COMMAND              slash-separated matched command path (e.g. release/build)
+      RUN_ROOT                 absolute path to the project root
+      RUN_CONTAINER_RUNTIME    resolved container runtime: "podman" or
+                               "docker" (empty if neither is installed —
+                               not fatal, see Dispatch target)
+      RUN_CONTAINER_IMAGE      configured image name (empty if unset in run.conf)
+
+    RUN_CONTAINER_RUNTIME and RUN_CONTAINER_IMAGE let a command invoke the
+    container manager itself without re-detecting it — e.g. a
+    host-dispatched command that starts a sibling container:
+    "$RUN_CONTAINER_RUNTIME" run "$RUN_CONTAINER_IMAGE" ...
+    Deliberately named apart from --runtime/--image (RUN_RUNTIME/RUN_IMAGE)
+    so a nested run.sh-based command doesn't mistake this invocation's
+    resolved values for its own override input.
 
     mount file format:
       /absolute/container/path   bind-mount <cmd>/fs/absolute/path here
@@ -1022,6 +1038,11 @@ mount_nix_store() {
 # §08.02  uid_map_args()    — runtime-specific UID/GID mapping flags
 
 # §08.01 detect_runtime
+# Resolves RUN_RUNTIME to "podman" or "docker" if not already set via
+# --runtime / RUN_RUNTIME / run.conf. Silent on failure (RUN_RUNTIME stays
+# empty) — this is called unconditionally for metadata injection (ADR-0019),
+# where a missing runtime is not fatal. Callers that actually need a runtime
+# must check the return status and log/exit themselves.
 detect_runtime() {
     if [ -n "$RUN_RUNTIME" ]; then
         return 0
@@ -1031,7 +1052,6 @@ detect_runtime() {
     elif command -v docker >/dev/null 2>&1; then
         RUN_RUNTIME="docker"
     else
-        log_error "no container runtime found (tried podman, docker)"
         return 1
     fi
 }
@@ -1366,17 +1386,26 @@ main() {
     RUN_MOUNT_PAIRS=""
     load_command_config "$RUN_COMMAND_PATH"
 
+    # Best-effort runtime resolution for the metadata injected below. Not
+    # fatal here — a host-dispatched command that never touches containers
+    # must keep working even with neither podman nor docker installed
+    # (ADR-0019). Callers that actually need a runtime (container dispatch,
+    # --clean, package management) re-check below and exit 125 themselves.
+    detect_runtime
+
     # Inject read-only runner metadata (cannot be overridden by command env files).
     set_env "RUN_PROJECT=$_expected_name"
     set_env "RUN_COMMAND=${RUN_COMMAND_PATH:-}"
     set_env "RUN_ROOT=$RUN_RUN_ROOT"
+    set_env "RUN_CONTAINER_RUNTIME=${RUN_RUNTIME:-}"
+    set_env "RUN_CONTAINER_IMAGE=${RUN_IMAGE:-}"
 
     # Package management / --clean: need the runtime but not a command main.
     if [ "${RUN_CLEAN:-0}" = "1" ] || \
        [ -n "${RUN_PKG_SEARCH:-}" ] || \
        [ -n "${RUN_PKG_ADD:-}" ] || \
        [ -n "${RUN_PKG_REMOVE:-}" ]; then
-        detect_runtime || exit 125
+        detect_runtime || { log_error "no container runtime found (tried podman, docker)"; exit 125; }
         manage_image
         manage_packages
     fi
@@ -1410,7 +1439,7 @@ main() {
         exit $?
     fi
 
-    detect_runtime || exit 125
+    detect_runtime || { log_error "no container runtime found (tried podman, docker)"; exit 125; }
     manage_image
     mount_nix_store
 

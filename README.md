@@ -103,9 +103,21 @@ git commit -m "chore: update run.sh"
 - **Host dispatch** — a command normally runs inside the container, but
   setting `dispatch = host` in its `conf` file runs `main.<ext>` directly on
   the host instead — for commands that must drive another container runtime
-  or otherwise can't run nested. `env` vars and `RUN_PROJECT`/`RUN_COMMAND`/
-  `RUN_ROOT` are still exported into the host process; mounts, image
-  management, and `--timeout` don't apply and are skipped.
+  or otherwise can't run nested. `env` vars and runner metadata are still
+  exported into the host process; mounts, image management, and `--timeout`
+  don't apply and are skipped.
+
+- **Runtime/image metadata** — every command, host- or container-dispatched,
+  gets `RUN_CONTAINER_RUNTIME` (resolved `podman`/`docker` binary) and
+  `RUN_CONTAINER_IMAGE` (the configured image name) injected alongside
+  `RUN_PROJECT`/`RUN_COMMAND`/`RUN_ROOT`, so a command can invoke the
+  container manager itself — `"$RUN_CONTAINER_RUNTIME" run
+  "$RUN_CONTAINER_IMAGE" ...` — without re-detecting it. Named apart from
+  the `--runtime`/`--image` override flags so a nested run.sh-based command
+  never mistakes this metadata for its own configuration. Resolution is
+  best-effort: `RUN_CONTAINER_RUNTIME` comes back empty rather than failing
+  the command if neither podman nor docker is installed, since most
+  commands never touch it.
 
 - **Auto-build / auto-rebuild** — builds the container image when absent;
   detects `Dockerfile` changes via fingerprint label and rebuilds

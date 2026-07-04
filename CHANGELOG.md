@@ -18,6 +18,14 @@ Versions are date codes: `YYYY-MM-DD`.
   host instead of inside the container, exporting `env` vars and
   `RUN_PROJECT`/`RUN_COMMAND`/`RUN_ROOT` into the host process first.
   Inherited root→leaf like other command config. `docs/adr/0017`.
+- `RUN_CONTAINER_RUNTIME` (resolved `podman`/`docker` binary) and
+  `RUN_CONTAINER_IMAGE` (configured image name) injected as runner metadata
+  for every command, host- or container-dispatched — lets a command invoke
+  the container manager itself without re-detecting it. Named apart from
+  the `--runtime`/`--image` override inputs to avoid collision with a
+  nested run.sh-based command's own configuration. Runtime resolution is
+  best-effort: empty rather than fatal if neither podman nor docker is
+  installed, since most commands don't need it. `docs/adr/0019`.
 
 ### Removed
 - `Makefile` — eliminated; `./run.sh test` replaces all targets.

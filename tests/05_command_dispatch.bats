@@ -241,6 +241,28 @@ teardown() { teardown_fixture; }
     [[ "$stderr" == *"RUN_PROJECT="* ]]
 }
 
+@test "metadata: RUN_CONTAINER_RUNTIME reflects the detected runtime" {
+    setup_command "hello"
+    run --separate-stderr "$RUN_SH" --dry-run hello
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"RUN_CONTAINER_RUNTIME=podman"* ]]
+}
+
+@test "metadata: RUN_CONTAINER_IMAGE reflects the configured image" {
+    setup_command "hello"
+    run --separate-stderr "$RUN_SH" --dry-run hello
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"RUN_CONTAINER_IMAGE=test:latest"* ]]
+}
+
+@test "metadata: missing runtime is still fatal for container-dispatched commands" {
+    setup_command "hello"
+    rm -f "$FIXTURE_DIR/bin/podman" "$FIXTURE_DIR/bin/docker"
+    run --separate-stderr "$RUN_SH" --dry-run hello
+    [ "$status" -eq 125 ]
+    [[ "$stderr" == *"no container runtime found"* ]]
+}
+
 # ── behavior 13: rename warning ───────────────────────────────────────────
 
 @test "rename: no warning when script name matches run root basename" {

@@ -91,6 +91,29 @@ teardown() { teardown_fixture; }
     [[ "$output" == *"from_env_file hello"* ]]
 }
 
+@test "dispatch: host command receives RUN_CONTAINER_RUNTIME and RUN_CONTAINER_IMAGE" {
+    mkdir -p "$FIXTURE_DIR/commands/hello"
+    printf '#!/bin/sh\nprintf "runtime=%%s image=%%s\\n" "$RUN_CONTAINER_RUNTIME" "$RUN_CONTAINER_IMAGE"\n' \
+        > "$FIXTURE_DIR/commands/hello/main.sh"
+    chmod +x "$FIXTURE_DIR/commands/hello/main.sh"
+    printf 'dispatch = host\n' > "$FIXTURE_DIR/commands/hello/conf"
+    run "$RUN_SH" hello
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"runtime=podman image=test:latest"* ]]
+}
+
+@test "dispatch: host command works with no container runtime installed" {
+    mkdir -p "$FIXTURE_DIR/commands/hello"
+    printf '#!/bin/sh\nprintf "runtime=[%%s]\\n" "$RUN_CONTAINER_RUNTIME"\n' \
+        > "$FIXTURE_DIR/commands/hello/main.sh"
+    chmod +x "$FIXTURE_DIR/commands/hello/main.sh"
+    printf 'dispatch = host\n' > "$FIXTURE_DIR/commands/hello/conf"
+    rm -f "$FIXTURE_DIR/bin/podman" "$FIXTURE_DIR/bin/docker"
+    run "$RUN_SH" hello
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"runtime=[]"* ]]
+}
+
 @test "dispatch: remaining args are forwarded to host-dispatched main" {
     mkdir -p "$FIXTURE_DIR/commands/hello"
     printf '#!/bin/sh\necho "args: $*"\n' > "$FIXTURE_DIR/commands/hello/main.sh"
