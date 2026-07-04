@@ -47,6 +47,15 @@ Command-line option > environment variable > `run.conf` > built-in default. Appl
 ### Command load order
 The sequence in which command configuration is applied: command tree root (`commands/run`, `commands/env`) → each directory level along the command path in order → deepest matched command directory last. Mount specs accumulate across all levels; env var conflicts and mount destination conflicts are resolved last-wins (deepest directory wins).
 
+### Command conf
+`commands/<cmd>/conf` (or `conf.txt`) — a per-command settings file, `key = value` per line, `#` comments and blank lines ignored. Loaded by `load_command_config` alongside `run` and `env` files, same root→leaf walk, same last-wins override semantics. Currently recognizes one key: `dispatch`. Unknown keys and unknown values are a hard error (exit 125), matching `commands/run.conf`'s strictness. See ADR-0017.
+
+### Dispatch target
+The per-command setting (`dispatch` in `commands/<cmd>/conf`) that decides whether a command's `main.<ext>` runs inside the container (`dispatch = container`, the default) or directly on the host (`dispatch = host`). Inherited root→leaf like other command config — set once on a parent directory to cover a whole subtree, override on a child to opt back out. An intentional exception to the three-surface rule (ADR-0005), alongside `name` in `commands/run.conf` (ADR-0016) — it is a per-command declaration, not a project-wide runtime tunable. See ADR-0017.
+
+### Host dispatch
+What happens when a command's resolved dispatch target is `host`: `detect_runtime`, `manage_image`, `mount_nix_store`, `build_cwd_mounts`, and `build_mirror_mounts` are all skipped, and `main.<ext>` is `exec`'d directly on the host with the remaining args, replacing the run.sh process. The env vars accumulated from `commands/env` files, plus the injected `RUN_PROJECT`/`RUN_COMMAND`/`RUN_ROOT` metadata, are exported into the host process environment first, so the script sees the same environment it would inside the container. `--mirror`/`--mirror-ro` and `--timeout` are container-only; run.sh warns (rather than silently ignoring) if they're set for a host-dispatched command. `--dry-run` prints the env exports and resolved host command line instead of a container invocation. See ADR-0017.
+
 ### Option parsing
 The runner greedily consumes its own recognized options from the front of the argument list. The first non-option, non-`--` token begins command dispatch. `--` forces an explicit switch to command dispatch: everything after `--` is treated as the command path and its arguments. This allows run.sh options and command path tokens to coexist unambiguously (e.g. `foo --verbose -- release build` sets verbosity then dispatches to `commands/release/build/`).
 

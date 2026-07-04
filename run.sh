@@ -81,6 +81,7 @@ Command dispatch (resolved from commands/ at project root):
   commands/<cmd>/main[.ext]   executable for <cmd>
   commands/<cmd>/env          KEY=VALUE pairs injected per command
   commands/<cmd>/run          additional bind-mounts per command
+  commands/<cmd>/conf         per-command settings (dispatch = host|container)
   commands/<cmd>/fs/          host-side mount sources
 
 Run 'myproject --help' for the full manual with all options and examples.
@@ -122,11 +123,23 @@ ${SECTION}COMMAND DISPATCH${RESET}
       commands/<cmd>/env          KEY=VALUE pairs injected into the container
       commands/<cmd>/run          additional bind-mounts (one /container/path
                                   per line; host source: <cmd>/fs/path)
+      commands/<cmd>/conf         per-command settings (dispatch = host|container)
       commands/<cmd>/help.md      help text shown by --help and in listings
       commands/<cmd>/fs/          host-side mount sources
 
     Configuration is inherited root→leaf; child values override parent values
     for the same key.
+
+    Dispatch target:
+      By default every command runs inside the container. Set
+      'dispatch = host' in commands/<cmd>/conf to run that command's main
+      directly on the host instead — useful for commands that must manage
+      another container runtime, or otherwise cannot run nested inside this
+      one. Inherited root->leaf like env/run; the deepest explicit setting
+      wins. commands/env vars (plus RUN_PROJECT, RUN_COMMAND, RUN_ROOT) are
+      still exported into the host process environment. Mounts, --timeout,
+      and image management are irrelevant on the host and are skipped
+      (with a warning if explicitly requested).
 
     Injected environment variables:
       RUN_PROJECT     resolved project name (script basename)
@@ -587,7 +600,7 @@ find_run_root() {
 # ─────────────────────────────────────────────────────────────
 # §05.01  dispatch_command()      — greedy walk into commands/ tree
 # §05.02  probe_main()            — find main.<ext> in a directory
-# §05.03  load_command_config()   — load run/env files root→leaf, last-wins
+# §05.03  load_command_config()   — load run/env/conf files root→leaf, last-wins
 # §05.04  set_mount()             — add/replace mount by container dest
 # §05.05  set_env()               — add/replace env var by key
 # §05.06  show_command_listing()  — auto-generated sub-command list
@@ -644,8 +657,10 @@ probe_main() {
 }
 
 # §05.03 load_command_config COMMAND_PATH
-# Loads run/env files from commands/ root down to the matched command directory.
-# Mount specs and env vars accumulate; conflicts resolved last-wins (deepest dir wins).
+# Loads run/env/conf files from commands/ root down to the matched command
+# directory. Mount specs and env vars accumulate; conflicts resolved
+# last-wins (deepest dir wins). RUN_DISPATCH (host|container) is likewise
+# resolved last-wins from each level's conf file, defaulting to "container".
 load_command_config() {
     local command_path="$1"
     local dirs="$RUN_RUN_ROOT/commands"
@@ -664,6 +679,8 @@ load_command_config() {
             fi
         done
     fi
+
+    RUN_DISPATCH="container"
 
     local dir
     for dir in $dirs; do
@@ -696,6 +713,37 @@ load_command_config() {
                     *) set_env "$line" ;;
                 esac
             done < "$env_file"
+        fi
+
+        local conf_file=""
+        [ -f "$dir/conf" ]     && conf_file="$dir/conf"
+        [ -f "$dir/conf.txt" ] && conf_file="$dir/conf.txt"
+        if [ -n "$conf_file" ]; then
+            local line key value
+            while IFS= read -r line; do
+                case "$line" in
+                    ''|'#'*) continue ;;
+                esac
+                key="${line%%=*}"
+                value="${line#*=}"
+                key="$(printf '%s' "$key" | tr -d ' ')"
+                value="$(printf '%s' "$value" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')"
+                case "$key" in
+                    dispatch)
+                        case "$value" in
+                            host|container) RUN_DISPATCH="$value" ;;
+                            *)
+                                log_error "invalid dispatch value '$value' in $conf_file (must be 'host' or 'container')"
+                                exit 125
+                                ;;
+                        esac
+                        ;;
+                    *)
+                        log_error "unknown key '$key' in $conf_file"
+                        exit 125
+                        ;;
+                esac
+            done < "$conf_file"
         fi
     done
 }
@@ -991,11 +1039,23 @@ uid_map_args() {
 # ─────────────────────────────────────────────────────────────
 # §09.01  dry_run_print()   — print resolved invocation
 # §09.02  invoke_container() — build and exec the container command
+# §09.03  invoke_host()      — exec main directly on the host
 
 # §09.01 dry_run_print
 dry_run_print() {
     local ts
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    if [ "${RUN_DISPATCH:-container}" = "host" ]; then
+        local pair
+        printf '%s\n' "$RUN_ENV_PAIRS" | while IFS= read -r pair; do
+            [ -z "$pair" ] && continue
+            printf '%s [INFO ] run: dry-run env %s\n' "$ts" "$pair" >&2
+        done
+        printf '%s [INFO ] run: dry-run host command: %s\n' "$ts" "$RUN_USER_CMD" >&2
+        return 0
+    fi
+
     local pair
     printf '%s\n' "$RUN_MOUNT_PAIRS" | while IFS= read -r pair; do
         [ -z "$pair" ] && continue
@@ -1114,6 +1174,25 @@ _ENVS_
         set -- "$@" --entrypoint bash
         "$RUN_RUNTIME" run "$@" "$RUN_IMAGE" -c '"$@"' -- $RUN_USER_CMD
     fi
+}
+
+# §09.03 invoke_host
+# Executes the matched command's main directly on the host, bypassing the
+# container runtime entirely. Env pairs accumulated from commands/env files
+# (plus RUN_PROJECT/RUN_COMMAND/RUN_ROOT) are exported into the host process
+# environment so the script behaves the same whether host- or
+# container-dispatched. Mounts, image management, and the nix store are
+# irrelevant on the host and are skipped by the caller.
+invoke_host() {
+    local pair
+    while IFS= read -r pair; do
+        [ -z "$pair" ] && continue
+        export "${pair%%=*}=${pair#*=}"
+    done <<_ENVS_
+$RUN_ENV_PAIRS
+_ENVS_
+
+    exec $RUN_USER_CMD
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -1302,6 +1381,23 @@ main() {
     RUN_USER_CMD="$RUN_MAIN"
     if [ -n "$RUN_REMAINING_ARGS" ]; then
         RUN_USER_CMD="$RUN_USER_CMD $RUN_REMAINING_ARGS"
+    fi
+
+    # Host dispatch: bypass the container runtime entirely (commands/conf
+    # 'dispatch = host'). Container-only options are no-ops here; warn if set.
+    if [ "${RUN_DISPATCH:-container}" = "host" ]; then
+        if [ -n "${RUN_MIRRORS:-}${RUN_MIRRORS_RO:-}" ]; then
+            log_warn "--mirror ignored: command dispatches to host"
+        fi
+        if [ "${RUN_TIMEOUT:-0}" != "0" ]; then
+            log_warn "--timeout ignored: command dispatches to host"
+        fi
+        if [ "${RUN_DRY_RUN:-0}" = "1" ]; then
+            dry_run_print
+            exit 0
+        fi
+        invoke_host
+        exit $?
     fi
 
     detect_runtime || exit 125
