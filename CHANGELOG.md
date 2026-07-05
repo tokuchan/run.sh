@@ -6,6 +6,20 @@ Versions are date codes: `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+### Fixed
+- `--search` and `--add` no longer bypass the shared nix store mount.
+  Both previously called the container runtime directly, skipping the
+  `/nix` bind-mount every other invocation gets, so each call re-fetched
+  and re-evaluated all of nixpkgs from the network — 3+ minutes and tens
+  of thousands of log lines per call. A new `pkg_nix_run()` helper
+  (`run.sh` §13.00) now mounts the shared store, mounts a persisted
+  eval-cache directory (nix's own SQLite memoization, which doesn't
+  survive `--rm` containers otherwise), and passes `nix --quiet` to
+  suppress the per-attribute "evaluating '...'" trace nix prints whenever
+  stderr isn't a TTY. Repeat searches now take ~5 seconds. A one-time
+  warning covers the unavoidable first-use cache warmup so it doesn't
+  look like a hang.
+
 ## [2026-07-05]
 
 ### Added

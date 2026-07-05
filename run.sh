@@ -1031,31 +1031,32 @@ _build_image() {
 # On first use (store empty), seeds the store from the image so packages
 # already installed in the image remain available after the mount.
 # Seeding is skipped in dry-run (ADR-0009: dry-run never changes state).
+# Sets RUN_STORE_ROOT (global) so callers outside invoke_container's mount
+# loop — e.g. pkg_nix_run — can mount the same store directly.
 mount_nix_store() {
-    local store_root
     case "${RUN_STORE:-shared}" in
         local)
-            store_root="${RUN_RUN_ROOT}/commands/fs/nix"
+            RUN_STORE_ROOT="${RUN_RUN_ROOT}/commands/fs/nix"
             ;;
         *)
             local cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
-            store_root="${cache_home}/run/nix"
+            RUN_STORE_ROOT="${cache_home}/run/nix"
             ;;
     esac
-    mkdir -p "$store_root"
-    if [ -z "$(ls -A "$store_root" 2>/dev/null)" ]; then
+    mkdir -p "$RUN_STORE_ROOT"
+    if [ -z "$(ls -A "$RUN_STORE_ROOT" 2>/dev/null)" ]; then
         if [ -n "${RUN_IMAGE:-}" ] && [ "${RUN_DRY_RUN:-0}" != "1" ]; then
             if "$RUN_RUNTIME" image inspect "$RUN_IMAGE" >/dev/null 2>&1; then
                 log_info "seeding nix store from $RUN_IMAGE (first use)"
                 "$RUN_RUNTIME" run --rm \
-                    --volume "${store_root}:/nix-host" \
+                    --volume "${RUN_STORE_ROOT}:/nix-host" \
                     "$RUN_IMAGE" \
                     sh -c 'cp -a /nix/. /nix-host/'
             fi
         fi
     fi
-    [ "$(ls -A "$store_root" 2>/dev/null)" ] || return 0
-    RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${store_root}:/nix
+    [ "$(ls -A "$RUN_STORE_ROOT" 2>/dev/null)" ] || return 0
+    RUN_MOUNT_PAIRS="${RUN_MOUNT_PAIRS}${RUN_STORE_ROOT}:/nix
 "
 }
 
@@ -1264,14 +1265,56 @@ _ENVS_
 # ─────────────────────────────────────────────────────────────
 # §13 PACKAGE MANAGEMENT
 # ─────────────────────────────────────────────────────────────
+# §13.00  pkg_nix_run() — run a one-off nix command with the shared store
 # §13.01  pkg_search()  — run nix search nixpkgs inside container
 # §13.02  pkg_add()     — validate + insert package above sentinel
 # §13.03  pkg_remove()  — delete package line from flake.nix
 
+# §13.00 pkg_nix_run
+# Runs a one-off `nix <args>` command inside the container. Used by
+# package-management operations (search, add) that need nixpkgs evaluation
+# but not the full invoke_container() pipeline — no cwd mounts, env-host,
+# tty, or workdir concerns apply here.
+#
+# Two host-side caches are mounted, both required for acceptable
+# performance:
+#   - the shared nix store (/nix), so nixpkgs isn't re-fetched from the
+#     network on every call (see mount_nix_store)
+#   - a persisted eval-cache directory, so nix's SQLite memoization of
+#     evaluated attributes survives across --rm container runs; without it,
+#     nix re-evaluates every one of nixpkgs' ~80k attributes from scratch
+#     each time even with a warm store
+#
+# --quiet suppresses nix's per-attribute "evaluating 'x'..." progress
+# trace, which nix prints one line per attribute (regardless of cache
+# hits) whenever stderr isn't a real TTY — the source of the "thousands of
+# lines" symptom, independent of caching.
+pkg_nix_run() {
+    mount_nix_store
+
+    local cache_home eval_cache_root
+    cache_home="${XDG_CACHE_HOME:-$HOME/.cache}"
+    eval_cache_root="${cache_home}/run/nix-eval-cache"
+    mkdir -p "$eval_cache_root"
+
+    # --quiet silences the eval-cache warmup along with everything else, so
+    # a cold cache would otherwise look like a hang for the ~couple of
+    # minutes nix needs to evaluate all of nixpkgs the first time.
+    if [ -z "$(ls -A "$eval_cache_root" 2>/dev/null)" ]; then
+        log_warn "warming nix's package index (first use) — this can take a couple of minutes"
+    fi
+
+    "$RUN_RUNTIME" run --rm \
+        --volume "${RUN_STORE_ROOT}:/nix" \
+        --volume "${eval_cache_root}:/nix-eval-cache" \
+        --env "XDG_CACHE_HOME=/nix-eval-cache" \
+        "$RUN_IMAGE" nix --quiet "$@"
+}
+
 # §13.01 pkg_search
 pkg_search() {
     local term="$1"
-    "$RUN_RUNTIME" run --rm "$RUN_IMAGE" nix search nixpkgs "$term"
+    pkg_nix_run search nixpkgs "$term"
 }
 
 # §13.02 pkg_add
@@ -1295,7 +1338,7 @@ pkg_add() {
         return 0
     fi
 
-    if ! "$RUN_RUNTIME" run --rm "$RUN_IMAGE" nix eval "nixpkgs#${pkg}" >/dev/null 2>&1; then
+    if ! pkg_nix_run eval "nixpkgs#${pkg}" >/dev/null 2>&1; then
         log_error "package '$pkg' not found in nixpkgs (nix eval nixpkgs#${pkg} failed)"
         exit 125
     fi

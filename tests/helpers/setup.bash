@@ -58,8 +58,8 @@ case "$1" in
     stop)  exit 0 ;;
     run)
         case "$*" in
-            *"nix search"*) printf '%s\n' "$FAKE_NIX_SEARCH_OUTPUT"; exit 0 ;;
-            *"nix eval"*)   exit "$FAKE_NIX_EVAL_EXIT" ;;
+            *"search nixpkgs"*) printf '%s\n' "$FAKE_NIX_SEARCH_OUTPUT"; exit 0 ;;
+            *"eval nixpkgs"*)   exit "$FAKE_NIX_EVAL_EXIT" ;;
             *)
                 [ "${FAKE_RUNTIME_HANG:-0}" -gt 0 ] && sleep "$FAKE_RUNTIME_HANG"
                 exit "$FAKE_RUNTIME_EXIT"

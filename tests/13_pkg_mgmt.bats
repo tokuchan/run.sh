@@ -9,6 +9,9 @@ setup() {
     setup_fake_runtime
     write_run_conf "image = test:latest"
     setup_command "echo"
+    # Scope the nix store / eval-cache mounts pkg_nix_run() creates into the
+    # fixture, so tests never touch the real $HOME/.cache.
+    export XDG_CACHE_HOME="$FIXTURE_DIR/cache"
 }
 teardown() { teardown_fixture; }
 
@@ -31,10 +34,31 @@ FLAKE
 @test "search: --search runs nix search nixpkgs inside container" {
     run "$RUN_SH" --search nodejs
     [ "$status" -eq 0 ]
-    grep -q "nix search nixpkgs nodejs" "$FAKE_RUNTIME_LOG"
+    grep -q -- "nix --quiet search nixpkgs nodejs" "$FAKE_RUNTIME_LOG"
+}
+
+@test "search: --search mounts the shared nix store" {
+    run "$RUN_SH" --search nodejs
+    [ "$status" -eq 0 ]
+    grep -q -- "--volume ${FIXTURE_DIR}/cache/run/nix:/nix" "$FAKE_RUNTIME_LOG"
+}
+
+@test "search: --search mounts a persisted eval-cache" {
+    run "$RUN_SH" --search nodejs
+    [ "$status" -eq 0 ]
+    grep -q -- "--volume ${FIXTURE_DIR}/cache/run/nix-eval-cache:/nix-eval-cache" "$FAKE_RUNTIME_LOG"
+    grep -q -- "--env XDG_CACHE_HOME=/nix-eval-cache" "$FAKE_RUNTIME_LOG"
 }
 
 # ── --add ─────────────────────────────────────────────────────────────────────
+@test "add: --add validates existence via a quiet, store-mounted nix eval" {
+    write_flake
+    run "$RUN_SH" --add ripgrep
+    [ "$status" -eq 0 ]
+    grep -q -- "nix --quiet eval nixpkgs#ripgrep" "$FAKE_RUNTIME_LOG"
+    grep -q -- "--volume ${FIXTURE_DIR}/cache/run/nix:/nix" "$FAKE_RUNTIME_LOG"
+}
+
 @test "add: --add inserts package above sentinel in flake.nix" {
     write_flake
     run "$RUN_SH" --add ripgrep
