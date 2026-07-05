@@ -50,7 +50,7 @@ The expected project name is the `name` key in `commands/run.conf` if present, o
 
 ## Consequences
 - ADR-0002 (stem as atomic unit) is superseded. The Command is the new atomic unit.
-- ADR-0010's no-args safety invariant is relaxed: `commands/main.<ext>` may run with side effects when the runner is invoked with no arguments. Project authors control the no-args experience; the auto-generated listing is the safe fallback when no `main.<ext>` exists.
+- ADR-0010's no-args safety invariant is retained, not relaxed, in the shipped implementation: `main()` intercepts the zero-argument case before `dispatch_command` ever runs, so a root-level `commands/main.<ext>` can never execute via bare invocation. (This bullet previously claimed the invariant was relaxed; that was aspirational and never implemented. See ADR-0020, which adds a best-effort command listing after the cheat sheet without touching this invariant.)
 - ADR-0005's three-surface rule has one exception: `name` in `run.conf`.
 - The `--stem` / `-s` flag, the `stems` `run.conf` key, and all `@include` handling are removed.
 - Existing projects using the stem system must migrate to the command directory layout. No coexistence mode is provided.

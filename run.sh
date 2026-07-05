@@ -76,6 +76,15 @@ Bootstrap:
   --init-config          Write commands/run.conf only
   --init-commands        Write commands/ skeleton only
 
+Package management (edits flake.nix):
+  --search <term>        Search nixpkgs for a package
+  --add <pkg>            Add a nix attribute path to flake.nix
+  --remove <pkg>         Remove a nix attribute path from flake.nix
+
+Discovery:
+  --list-commands        List all available commands (recursive, machine-
+                         readable, tab-separated description)
+
 Command dispatch (resolved from commands/ at project root):
   commands/run.conf           project config (image, timeout, store, …)
   commands/<cmd>/main[.ext]   executable for <cmd>
@@ -114,7 +123,10 @@ ${SECTION}SYNOPSIS${RESET}
 
 ${SECTION}COMMAND DISPATCH${RESET}
     Commands live under commands/ at the project root (beside commands/run.conf).
-    Run without a command to see a listing of available commands.
+    Run without any arguments to see the cheat sheet, followed by a listing of
+    available commands (best-effort: the listing is appended only if a run
+    root is found; the cheat sheet itself is always shown regardless of
+    project state — see ADR-0020).
 
     Directory layout:
       commands/run.conf           project config (image, timeout, store, ...)
@@ -217,6 +229,16 @@ ${SECTION}OPTIONS${RESET}
     --init-config          Write commands/run.conf with image placeholder
     --init-commands        Write commands/ skeleton with .gitignore and help.md
 
+  ${SUBSECTION}Package management${RESET} (edits flake.nix; see Toolchain specifier in CONTEXT.md):
+    --search <term>        Run 'nix search nixpkgs <term>' inside the container
+    --add <pkg>            Validate <pkg> against nixpkgs and insert it into
+                           flake.nix above the '# run:packages' sentinel
+    --remove <pkg>         Remove <pkg>'s line from flake.nix
+                           (--search/--add/--remove are management operations:
+                           they exit without running a command, same as --init
+                           and --clean; combining them in one invocation runs
+                           --search, then --add, then --remove, in that order)
+
   ${SUBSECTION}Discovery:${RESET}
     --list-commands        List all available commands (one per line, tab-
                            separated description when help.md is present)
@@ -257,11 +279,17 @@ ${SECTION}EXAMPLES${RESET}
     myproject build                    # run commands/build/main.sh in container
     myproject release package --arch=arm64
     myproject --dry-run build          # preview container invocation
-    myproject                          # show available commands
+    myproject                          # cheat sheet + available commands
+    myproject --list-commands          # machine-readable command list
 
     # Image management
     myproject --force-rebuild build    # rebuild image then run command
     myproject --clean                  # remove image
+
+    # Package management
+    myproject --search ripgrep         # search nixpkgs
+    myproject --add ripgrep            # add package to flake.nix
+    myproject --remove ripgrep         # remove package from flake.nix
 EOF
 }
 
@@ -1318,6 +1346,12 @@ manage_packages() {
 main() {
     if [ $# -eq 0 ]; then
         usage
+        # Best-effort: append the command listing if a run root can be found.
+        # Never errors and never has side effects — see ADR-0010/ADR-0020.
+        if find_run_root 2>/dev/null; then
+            printf '\n'
+            show_command_listing "$RUN_RUN_ROOT/commands"
+        fi
         exit 0
     fi
 

@@ -27,6 +27,29 @@ Versions are date codes: `YYYY-MM-DD`.
   best-effort: empty rather than fatal if neither podman nor docker is
   installed, since most commands don't need it. `docs/adr/0019`.
 
+### Fixed
+- Bare invocation (`./run.sh` with no arguments) now appends a best-effort
+  command listing after the cheat sheet when a run root can be found,
+  instead of showing the cheat sheet alone. README, `CONTEXT.md`, and
+  `--help`'s own EXAMPLES already claimed bare invocation lists commands;
+  the implementation never did. ADR-0010's no-args safety invariant is
+  unchanged — the cheat sheet is still always printed and the process
+  still always exits 0 with no side effects regardless of project state;
+  the listing is purely additive and silently omitted if no run root is
+  found. `docs/adr/0020`.
+- `--search`, `--add`, `--remove` (package management) were fully
+  implemented and tested but undocumented in both the `usage()` cheat
+  sheet and the full `--help` manual; documented in both, plus README.
+- `--list-commands` was documented in `--help` but missing from the
+  `usage()` cheat sheet and README; added to both.
+- `CONTEXT.md`'s "Command help" glossary entry incorrectly claimed
+  `--help` with no command path shows a command listing; it never did
+  (`--help` is intercepted before project-root detection runs) —
+  corrected, and a new "No-args cheat sheet" glossary entry added.
+- ADR-0016's Consequences section incorrectly claimed ADR-0010's no-args
+  safety invariant was relaxed (that a root `main.<ext>` could run on bare
+  invocation); this was never implemented — corrected, see ADR-0020.
+
 ### Removed
 - `Makefile` — eliminated; `./run.sh test` replaces all targets.
 - Root-level `run.conf` — config migrated to `commands/run.conf`.

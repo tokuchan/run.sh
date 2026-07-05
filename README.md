@@ -24,7 +24,8 @@ chmod +x commands/build/main.sh
 ./myproject build            # image built automatically on first run
 ./myproject release package --arch=arm64
 ./myproject --dry-run build  # preview the full container invocation
-./myproject                  # list available commands
+./myproject                  # cheat sheet, then available commands
+./myproject --list-commands  # machine-readable command list
 ```
 
 ## Requirements
@@ -127,6 +128,11 @@ git commit -m "chore: update run.sh"
   `nix develop --command`; the `/nix` store is shared across runs under
   `$XDG_CACHE_HOME/run/nix/` so images stay thin and package updates don't
   require rebuilding.
+
+- **Package management** — `--search <term>` runs `nix search nixpkgs` inside
+  the container; `--add <pkg>` validates the nix attribute path and inserts
+  it into `flake.nix` above the `# run:packages` sentinel; `--remove <pkg>`
+  deletes it. All three edit `flake.nix` instead of requiring a hand edit.
 
 - **Bootstrap** — `./myproject --init` writes stub `Dockerfile`, `flake.nix`,
   `commands/run.conf`, and a `commands/` skeleton without clobbering
