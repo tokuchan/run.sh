@@ -6,6 +6,8 @@ Versions are date codes: `YYYY-MM-DD`.
 
 ## [Unreleased]
 
+## [2026-07-05]
+
 ### Added
 - `commands/` tree scaffold for the run.sh project itself: `commands/run.conf`,
   `commands/test/main.sh` — `./run.sh test` now runs the full bats suite
