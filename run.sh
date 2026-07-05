@@ -1209,6 +1209,14 @@ _MOUNTS_
         [ "$RUN_RUNTIME" = "podman" ] && set -- "$@" --env-host
     fi
 
+    # Force a working UTF-8 locale. The toolchain image has no locale-archive,
+    # so a host LANG/LC_ALL forwarded above (or otherwise inherited) makes every
+    # bash startup in the container print setlocale warnings before the
+    # project's devShell ever runs. C.UTF-8 is built into glibc — no
+    # locale-archive needed — and always resolves. Placed before the .env-file
+    # pairs below so a project can still override it explicitly.
+    set -- "$@" --env "LANG=C.UTF-8" --env "LC_ALL=C.UTF-8"
+
     # Env pairs from .env files
     while IFS= read -r _pair; do
         [ -z "$_pair" ] && continue
